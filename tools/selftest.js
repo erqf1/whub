@@ -1,0 +1,266 @@
+'use strict';
+
+// Selbsttest (läuft im unsichtbaren Fenster, gestartet über tools/run-selftest.js).
+// Spielt GitHub mit einem lokalen Server, steuert die Oberfläche wie ein Mensch und prüft,
+// welche Installer mit welchen Parametern gestartet wurden (FakeSetup.exe schreibt log.txt).
+const fs = require('fs');
+const path = require('path');
+const http = require('http');
+const crypto = require('crypto');
+const { app } = require('electron');
+
+module.exports = async function selftest(win, dir, hub) {
+  const results = [];
+  const ok = (name, cond, extra) => {
+    results.push([!!cond, name]);
+    console.log(`${cond ? 'OK  ' : 'FEHL'} ${name}${extra !== undefined && !cond ? ` -> ${JSON.stringify(extra)}` : ''}`);
+  };
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  const js = (code) => win.webContents.executeJavaScript(code);
+  const until = async (code, ms = 15000) => {
+    const end = Date.now() + ms;
+    while (Date.now() < end) {
+      try {
+        const v = await js(code);
+        if (v) return v;
+      } catch {
+        // Seite lädt noch
+      }
+      await sleep(80);
+    }
+    return null;
+  };
+  const click = (sel) => js(`(() => { const el = document.querySelector(${JSON.stringify(sel)}); if (!el) return false; el.click(); return true; })()`);
+  const text = (sel) => js(`(document.querySelector(${JSON.stringify(sel)}) || {}).textContent || ''`);
+  const log = () => (fs.existsSync(path.join(dir, 'log.txt')) ? fs.readFileSync(path.join(dir, 'log.txt'), 'utf8').trim().split('\n').filter(Boolean) : []);
+  const fake = path.join(dir, 'FakeSetup.exe');
+  const fakeBytes = fs.readFileSync(fake);
+
+  // ---------------------------------------------------------------- ausgedachte Registry
+  const entry = (hive, key, name, version, exe, uninstall) => ({ hive, key, name, version, icon: path.join(dir, exe), location: dir, uninstall: `"${fake}"`, quiet: `"${fake}" ${uninstall}` });
+  const VID = (v) => entry('HKCU', '{B7D0C3E2-5A41-4C7E-9B61-3F2A8E6D1C90}_is1', `Vidline ${v}`, v, 'Vidline.exe', '/SILENT');
+  const CLIP = entry('HKCU', '{4F2C9A61-7D3B-4E8A-A5C2-9B1E6D0F3A77}_is1', 'Clipline version 1.9.0', '1.9.0', 'Clipline.exe', '/SILENT');
+  const TEXT = (v) => ({ ...entry('HKLM', 'd0565d34-edd1-5436-8ff2-a927d9ee791b', `Textline ${v}`, v, 'Textline.exe,0', '/allusers /S'), icon: `${path.join(dir, 'Textline.exe')},0` });
+  const WEB = entry('HKCU', 'b0d11819-7e3c-5ae6-808c-4aa8e370b417', 'Webline 1.10.0', '1.10.0', 'Webline.exe', '/currentuser /S');
+  const setReg = (list) => fs.writeFileSync(path.join(dir, 'registry.json'), JSON.stringify(list));
+  const nextReg = (list) => fs.writeFileSync(path.join(dir, 'next-registry.json'), JSON.stringify(list));
+  for (const exe of ['Vidline.exe', 'Clipline.exe', 'Textline.exe', 'Webline.exe']) fs.writeFileSync(path.join(dir, exe), 'x');
+  setReg([VID('1.13.0'), CLIP, TEXT('1.1.1')]);
+
+  // ---------------------------------------------------------------- GitHub zum Spielen
+  const port = Number(process.env.WHUB_TEST_PORT);
+  const base = `http://127.0.0.1:${port}`;
+  const files = {};
+  const addFile = (name, bytes) => {
+    files[name] = bytes;
+    return { name, size: bytes.length, browser_download_url: `${base}/dl/${encodeURIComponent(name)}`, digest: `sha256:${crypto.createHash('sha256').update(bytes).digest('hex')}` };
+  };
+  const tiny = (s) => Buffer.from(s);
+  const big = Buffer.alloc(3 * 1024 * 1024, 7);
+  const NOTES = '## Neu\n\n- **Plugins**: das Musik-Plugin mit Bibliothek\n- Fix: `MP3` mit Cover spielt wieder\n  - auch mit langen Titeln\n\nMehr im [Changelog](https://mert.win/vid/changelog.html).\n\n<!-- intern -->';
+  const rel = (tag, assets, body = `Version ${tag}`) => ({ tag_name: tag, name: tag, published_at: '2026-11-03T12:00:00Z', body, html_url: `https://github.com/x/releases/tag/${tag}`, prerelease: false, draft: false, assets });
+  const RELEASES = {
+    'erqf1/vidline': [rel('v1.14.0', [addFile('Vidline-windows-x64-setup.exe', fakeBytes), addFile('vidline_amd64.deb', tiny('deb')), addFile('Vidline-macos-intel.dmg', tiny('dmg'))], NOTES), rel('v1.13.0', [], 'Tag-Editor'), rel('v1.12.0', [], ''), { ...rel('v1.15.0-beta', []), draft: true }],
+    'erqf1/clipline': [rel('v1.9.0', [addFile('Clipline-windows-x64-setup.exe', fakeBytes)])],
+    'erqf1/webline': [rel('v1.10.0', [addFile('Webline-Setup-1.10.0.exe', fakeBytes), addFile('Webline-1.10.0-portable.exe', tiny('p')), addFile('Webline-1.10.0-amd64.deb', tiny('deb'))])],
+    'erqf1/textline': [rel('v1.2.0', [addFile('Textline-Setup-1.2.0.exe', fakeBytes)])],
+    'erqf1/picline': [rel('v1.1.1', [{ ...addFile('Picline-Setup-1.1.1.exe', fakeBytes), digest: 'sha256:0000' }])],
+    'erqf1/convertline': [rel('v1.0.0', [addFile('Convertline-Setup-1.0.0.exe', fakeBytes)])],
+    'erqf1/GambelStrike2': [rel('v1.1.0', [addFile('GambelStrike2-v1.1.0-Windows.exe', fakeBytes), addFile('GambelStrike2-v1.1.0-offline.html', tiny('<html></html>'))])],
+    'erqf1/JumpNDodge': [rel('installer', [addFile('JumpNDodge-Windows_Installer.exe', big)])],
+  };
+  const mode = { limit: false, slow: new Set(['JumpNDodge-Windows_Installer.exe']), apiCalls: 0, notModified: 0 };
+  const server = http.createServer((req, res) => {
+    const u = new URL(req.url, base);
+    const m = /^\/repos\/([^/]+\/[^/]+)\/releases$/.exec(u.pathname);
+    if (m) {
+      mode.apiCalls++;
+      if (mode.limit) {
+        res.writeHead(403, { 'Content-Type': 'application/json' });
+        return res.end('{"message":"API rate limit exceeded"}');
+      }
+      const list = RELEASES[m[1]];
+      if (!list) {
+        res.writeHead(404);
+        return res.end('{}');
+      }
+      const etag = `"t-${m[1]}"`;
+      if (req.headers['if-none-match'] === etag) {
+        mode.notModified++;
+        res.writeHead(304, { ETag: etag });
+        return res.end();
+      }
+      res.writeHead(200, { 'Content-Type': 'application/json', ETag: etag });
+      return res.end(JSON.stringify(list));
+    }
+    const d = /^\/dl\/(.+)$/.exec(u.pathname);
+    if (d && files[decodeURIComponent(d[1])]) {
+      const name = decodeURIComponent(d[1]);
+      const bytes = files[name];
+      res.writeHead(200, { 'Content-Type': 'application/octet-stream', 'Content-Length': bytes.length });
+      if (!mode.slow.has(name)) return res.end(bytes);
+      // langsam: 64 KB alle 100 ms
+      let pos = 0;
+      const tick = () => {
+        if (res.destroyed) return;
+        if (pos >= bytes.length) return res.end();
+        res.write(bytes.subarray(pos, pos + 65536));
+        pos += 65536;
+        setTimeout(tick, 100);
+      };
+      return tick();
+    }
+    res.writeHead(404);
+    res.end();
+  });
+  await new Promise((r) => server.listen(port, '127.0.0.1', r));
+
+  try {
+    // ---------------------------------------------------------------- Start
+    ok('Oberfläche bereit', await until('window.__ready === true', 30000));
+    await js(`window.__hub.setSetting('language', 'de')`);
+    ok('Katalog: 13 Kacheln', (await js(`document.querySelectorAll('.card').length`)) === 13, await js(`document.querySelectorAll('.card').length`));
+    ok('Drei Bereiche (Programme, Spiele, Im Browser)', (await js(`[...document.querySelectorAll('.sect-head h2')].map(x => x.textContent).join('|')`)) === 'Programme|Spiele|Im Browser');
+    ok('Erkannt: Vidline 1.13.0 mit Update auf 1.14.0', (await text('.card[data-app="vid"] .st')).includes('1.13.0 → 1.14.0'), await text('.card[data-app="vid"] .st'));
+    ok('Erkannt: Clipline aktuell', (await text('.card[data-app="clip"] .st')) === 'Installiert · 1.9.0', await text('.card[data-app="clip"] .st'));
+    ok('Nicht installiert: Webline mit Version', (await text('.card[data-app="html"] .st')) === 'Nicht installiert · 1.10.0', await text('.card[data-app="html"] .st'));
+    ok('Im Browser: Voca öffnet nur', (await text('.card[data-app="voca"] .btn')) === 'Im Browser öffnen');
+    ok('Updates-Zähler 2', (await text('.nav-btn[data-view="updates"] .count')) === '2');
+    ok('Hinweis oben: 2 Updates', (await text('.banner')).includes('2 Updates verfügbar'));
+    ok('Entwürfe werden nicht gezeigt', !(await js(`JSON.stringify(document.body.textContent)`)).includes('1.15.0-beta'));
+
+    // Suche
+    await js(`window.__hub.setQuery('pixel')`);
+    ok('Suche "pixel" findet Picline', (await js(`[...document.querySelectorAll('.card')].map(c => c.dataset.app).join()`)) === 'pic');
+    await js(`window.__hub.setQuery('minecraft')`);
+    ok('Suche "minecraft" findet Picline und Skin-Editor', (await js(`[...document.querySelectorAll('.card')].map(c => c.dataset.app).sort().join()`)) === 'pic,skin');
+    await js(`window.__hub.setQuery('zzzz')`);
+    ok('Suche ohne Treffer', (await text('.empty p')).includes('zzzz'));
+    await js(`window.__hub.setQuery('')`);
+
+    // App-Seite
+    await click('.card[data-app="vid"]');
+    await until(`!!document.querySelector('.hero h1')`);
+    ok('App-Seite: Name', (await text('.hero h1')) === 'Vidline');
+    ok('App-Seite: Version und Größe', (await text('.hero-meta')).includes('1.14.0') && (await text('.hero-meta')).includes('Download'));
+    ok('App-Seite: Systeme', (await text('.hero-meta')).includes('Windows · Linux · macOS'), await text('.hero-meta'));
+    ok('App-Seite: 5 Bilder, deutsche Fassung', (await js(`[...document.querySelectorAll('.shot img')].map(i => i.src.split('/').pop()).join()`)) === 'player.webp,library-de.webp,music.webp,theme-studio.webp,theme-light.webp');
+    ok('App-Seite: Bilder geladen', await until(`(() => { const i = document.querySelector('.shot img'); return i && i.complete && i.naturalWidth > 100; })()`, 8000));
+    ok('Neuerungen als Markdown (Liste, fett, Code, Link)', await js(`(() => { const md = document.querySelector('.notes .md'); return md && md.querySelector('li b') && md.querySelector('code') && md.querySelector('a') && md.querySelector('li ul li') && !md.textContent.includes('intern'); })()`));
+    ok('Frühere Versionen: 2', (await js(`document.querySelectorAll('.older details').length`)) === 2);
+    await js(`document.querySelector('.older details').open = true`);
+    ok('Frühere Version aufklappbar', await until(`(document.querySelector('.older details .md') || {}).textContent === 'Tag-Editor'`, 3000));
+    await click('.shot');
+    ok('Bild groß öffnen', await until(`!!document.querySelector('.lightbox img')`, 3000));
+    await js(`document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))`);
+    ok('Bild schließen mit Esc', !(await js(`!!document.querySelector('.lightbox')`)));
+    await click('.back-row .btn');
+    ok('Zurück zur Übersicht', await until(`document.querySelectorAll('.card').length === 13`, 3000));
+
+    // ---------------------------------------------------------------- Installieren (Webline, nsis, für mich)
+    nextReg([VID('1.13.0'), CLIP, TEXT('1.1.1'), WEB]);
+    await click('.card[data-app="html"] .act .btn');
+    ok('Webline: fertig installiert', await until(`(document.querySelector('.card[data-app="html"] .st') || {}).textContent === 'Installiert · 1.10.0'`, 20000), await text('.card[data-app="html"] .st'));
+    ok('Webline-Installer still und nur für mich', log().includes('Webline-Setup-1.10.0.exe|/S /currentuser'), log());
+    ok('Heruntergeladener Installer wieder gelöscht', !fs.existsSync(path.join(dir, 'downloads', 'Webline-Setup-1.10.0.exe')));
+
+    // ---------------------------------------------------------------- Alle aktualisieren (Vidline inno für mich, Textline nsis für alle)
+    await click('.nav-btn[data-view="updates"]');
+    ok('Updates-Ansicht: 2 Einträge mit Notizen', (await js(`document.querySelectorAll('.update-item').length`)) === 2 && (await js(`!!document.querySelector('.row-notes .md')`)));
+    nextReg([VID('1.14.0'), CLIP, TEXT('1.2.0'), WEB]);
+    await click('.sect-head .btn.primary');
+    ok('Alles aktuell nach "Alle aktualisieren"', await until(`(document.querySelector('.empty p') || {}).textContent === 'Alles ist aktuell.'`, 30000), await text('.page'));
+    const l = log();
+    ok('Vidline-Update still über Inno, für mich', l.includes('Vidline-windows-x64-setup.exe|/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /SP- /CLOSEAPPLICATIONS /CURRENTUSER'), l);
+    ok('Textline-Update für alle Benutzer (bleibt, wo es ist)', l.includes('Textline-Setup-1.2.0.exe|/S /allusers'), l);
+    ok('Nacheinander, nicht gleichzeitig', l.indexOf(l.find((x) => x.startsWith('Vidline'))) < l.indexOf(l.find((x) => x.startsWith('Textline'))));
+    ok('Updates-Zähler weg', (await text('.nav-btn[data-view="updates"] .count')) === '');
+
+    // ---------------------------------------------------------------- Deinstallieren (Clipline, Inno ohne Fenster)
+    await click('.nav-btn[data-view="installed"]');
+    ok('Installiert: 4 Programme', (await js(`document.querySelectorAll('.rows .row').length`)) === 4, await js(`document.querySelectorAll('.rows .row').length`));
+    await click('.row[data-app="clip"] .menu-anchor');
+    await until(`!!document.querySelector('.menu')`, 3000);
+    ok('Menü: Im Ordner zeigen, Deinstallieren, Website, GitHub', (await js(`[...document.querySelectorAll('.menu .menu-label')].map(x => x.textContent).join('|')`)) === 'Im Ordner zeigen|Deinstallieren|Website|GitHub');
+    await js(`[...document.querySelectorAll('.menu-item')].find(x => x.textContent.includes('Deinstallieren')).click()`);
+    ok('Nachfrage vor dem Deinstallieren', await until(`!!document.querySelector('.dialog .btn.danger')`, 3000));
+    nextReg([VID('1.14.0'), TEXT('1.2.0'), WEB]);
+    await click('.dialog .btn.danger');
+    ok('Clipline entfernt', await until(`document.querySelectorAll('.rows .row').length === 3`, 15000));
+    ok('Inno-Deinstaller ganz still', log().some((x) => x === 'FakeSetup.exe|/VERYSILENT /SUPPRESSMSGBOXES /NORESTART'), log());
+
+    // ---------------------------------------------------------------- Einzelne EXE (GambelStrike 2)
+    await js(`window.__hub.go('games')`);
+    await click('.card[data-app="gamble"] .act .btn');
+    ok('GambelStrike 2 abgelegt', await until(`(document.querySelector('.card[data-app="gamble"] .st') || {}).textContent === 'Installiert · 1.1.0'`, 15000));
+    const gsExe = path.join(dir, 'apps', 'gamble', 'GambelStrike2.exe');
+    ok('EXE liegt im Apps-Ordner', fs.existsSync(gsExe) && fs.statSync(gsExe).size === fakeBytes.length);
+    ok('managed.json merkt sich Version', JSON.parse(fs.readFileSync(path.join(dir, 'userdata', 'managed.json'), 'utf8')).gamble.version === '1.1.0');
+    ok('Öffnen geht', await js(`window.api.open('gamble')`));
+    ok('Kein Installer dafür gestartet', !log().some((x) => x.startsWith('GambelStrike')));
+    await js(`window.api.uninstall('gamble')`);
+    ok('GambelStrike 2 wieder entfernt', await until(`(document.querySelector('.card[data-app="gamble"] .st') || {}).textContent === 'Nicht installiert · 1.1.0'`, 10000));
+    ok('EXE gelöscht', !fs.existsSync(gsExe));
+    ok('Hinweise verschwinden wieder', await until(`document.querySelectorAll('.toast').length === 0`, 6000), await js(`document.querySelectorAll('.toast').length`));
+
+    // ---------------------------------------------------------------- Fehlerfälle
+    await js(`window.__hub.go('apps')`);
+    const before = log().length;
+    await click('.card[data-app="pic"] .act .btn');
+    ok('Kaputter Download: Fehler wird gezeigt', await until(`(document.querySelector('.card[data-app="pic"] .st.error') || {}).textContent.includes('beschädigt')`, 15000), await text('.card[data-app="pic"] .st'));
+    ok('Kaputter Download: nichts gestartet', log().length === before);
+
+    fs.writeFileSync(path.join(dir, 'exitcode.txt'), '5');
+    fs.rmSync(path.join(dir, 'next-registry.json'), { force: true });
+    await click('.card[data-app="convert"] .act .btn');
+    ok('Installer bricht ab: Code wird gezeigt', await until(`(document.querySelector('.card[data-app="convert"] .st.error') || {}).textContent.includes('Code 5')`, 15000), await text('.card[data-app="convert"] .st'));
+    fs.rmSync(path.join(dir, 'exitcode.txt'));
+    ok('Nochmal versuchen geht (Knopf bleibt)', (await text('.card[data-app="convert"] .act .btn')) === 'Installieren');
+
+    await js(`window.__hub.go('games')`);
+    await click('.card[data-app="jump"] .act .btn');
+    ok('Langsamer Download zeigt Fortschritt', await until(`/Lädt herunter … \\d+ %/.test((document.querySelector('.card[data-app="jump"] .job-label') || {}).textContent || '')`, 10000));
+    await click('.card[data-app="jump"] .act .icon-btn');
+    ok('Abbrechen: Knopf wieder da', await until(`(document.querySelector('.card[data-app="jump"] .act .btn') || {}).textContent === 'Installieren'`, 8000));
+    ok('Abbrechen: nichts installiert, keine Reste', !log().some((x) => x.startsWith('JumpNDodge')) && !fs.existsSync(path.join(dir, 'downloads', 'JumpNDodge-Windows_Installer.exe')) && !fs.existsSync(path.join(dir, 'downloads', 'JumpNDodge-Windows_Installer.exe.part')));
+
+    // ---------------------------------------------------------------- GitHub-Limit und Zwischenspeicher
+    const calls = mode.apiCalls;
+    await click('#refresh');
+    await sleep(800);
+    ok('Erneut prüfen: unveränderte Releases kommen als 304', mode.notModified >= 7, mode.notModified);
+    ok('Dabei je Programm nur eine Anfrage', mode.apiCalls - calls === 8, mode.apiCalls - calls);
+    mode.limit = true;
+    await click('#refresh');
+    ok('Limit erreicht: Hinweis oben', await until(`(document.querySelector('#checked') || {}).textContent.includes('GitHub-Limit')`, 8000), await text('#checked'));
+    ok('Limit erreicht: Versionen bleiben sichtbar', (await text('.card[data-app="jump"] .st')).includes('installer') || (await js(`document.querySelectorAll('.card').length`)) > 0);
+    mode.limit = false;
+
+    // ---------------------------------------------------------------- Einstellungen, Sprache, Stil
+    await click('#settings-btn');
+    ok('Einstellungen öffnen', await until(`!!document.querySelector('.settings-dialog select')`, 3000));
+    ok('Einstellungen: Für alle Benutzer installieren', (await text('.settings-dialog')).includes('für alle Benutzer'));
+    await click('.settings-dialog .btn.primary');
+    await js(`window.__hub.go('discover'); window.__hub.setSetting('language', 'en')`);
+    ok('Sprache Englisch: Leiste', (await text('.nav-btn[data-view="discover"] .nav-label')) === 'Discover');
+    ok('Sprache Englisch: App-Text', (await text('.card[data-app="clip"] .card-tag')).startsWith('That moment?'));
+    await js(`window.__hub.setSetting('language', 'ja')`);
+    ok('Japanisch: Leiste übersetzt, App-Text auf Englisch', (await text('.nav-btn[data-view="installed"] .nav-label')) === 'インストール済み' && (await text('.card[data-app="vid"] .card-tag')).startsWith('Your video'));
+    await js(`window.__hub.setSetting('look', 'acryl')`);
+    ok('Stil Acryl', (await js(`document.documentElement.dataset.look`)) === 'acryl');
+    await js(`window.__hub.setSetting('look', 'standard'); window.__hub.setSetting('language', 'de')`);
+    ok('Einstellungen gespeichert', JSON.parse(fs.readFileSync(path.join(dir, 'userdata', 'settings.json'), 'utf8')).language === 'de');
+
+    // Bild für den Bericht
+    await js(`window.__hub.go('discover')`);
+    await sleep(500);
+    const img = await win.webContents.capturePage();
+    fs.writeFileSync(path.join(dir, 'uebersicht.png'), img.toPNG());
+  } catch (e) {
+    ok(`Unerwarteter Fehler: ${e.message}`, false);
+  }
+  server.close();
+  const bad = results.filter(([r]) => !r);
+  console.log(`\n${results.length - bad.length} von ${results.length} Prüfungen bestanden`);
+  app.exit(bad.length ? 1 : 0);
+};

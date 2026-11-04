@@ -1,0 +1,60 @@
+name: Build & Release
+
+# Baut auf echten Windows-, Linux- und macOS-Runnern (nicht per Emulation) und lädt
+# die fertigen Pakete an das GitHub-Release des Tags an. .deb/.pacman brauchen das
+# Linux-Tool "fpm", das nur unter Linux läuft - daher hier statt lokal.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write # zum Anlegen des Release und Hochladen der Pakete
+
+jobs:
+  # Ein Job legt das Release EINMAL an, bevor die drei Plattform-Builds parallel
+  # starten - sonst versucht electron-builder es in jedem Job neu anzulegen und es
+  # entstehen doppelte Releases fuer denselben Tag (Race Condition).
+  draft-release:
+    runs-on: ubuntu-latest
+    steps:
+      - env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create "${{ github.ref_name }}" --repo "${{ github.repository }}" \
+            --draft --title "W Hub ${{ github.ref_name }}" \
+            --notes "Automatisch gebaut. Details siehe README." \
+            || echo "Release existiert schon, weiter."
+
+  build:
+    needs: draft-release
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm ci
+      # .pacman braucht bsdtar (libarchive-tools), das auf ubuntu-latest nicht
+      # vorinstalliert ist.
+      - if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libarchive-tools
+      - run: npm run bundle
+      - run: npx electron-builder --publish always
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # electron-builder laesst das Release als Entwurf zurueck - dessen Download-Links
+  # sind fuer alle außer dir unsichtbar, bis es veroeffentlicht wird. Das passiert
+  # erst, wenn wirklich alle drei Plattform-Builds durch sind.
+  publish-release:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release edit "${{ github.ref_name }}" --repo "${{ github.repository }}" --draft=false
