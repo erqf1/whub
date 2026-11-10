@@ -1,5 +1,6 @@
-// W Hub - Oberfläche: Leiste links, Suche oben, Kacheln, App-Seiten, Installiert und Updates.
-import { h, $, dialog, confirm, toast, showMenu } from './ui.js';
+// W Hub - Oberfläche: Leiste links (Meine Programme, Entdecken, Updates), Suche oben,
+// Start-Kacheln mit Ordnern, Katalog-Kacheln mit Filter/Sortierung, App-Seiten.
+import { h, $, dialog, confirm, prompt, toast, showMenu } from './ui.js';
 import { applyTheme, ACCENTS } from './theme.js';
 import { icon, logoSvg } from './icons.js';
 import { markdown } from './md.js';
@@ -12,9 +13,10 @@ const ASSETS = '../../assets';
 let settings = {};
 let info = {};
 let hub = { releases: {}, installed: {}, jobs: {}, checked: 0, error: null, sys: {} };
-let view = 'discover';
+let view = 'home';
 let current = null;
-let lastList = 'discover';
+let currentFolder = null;
+let lastList = 'home';
 let query = '';
 let booted = false;
 
@@ -36,6 +38,12 @@ function withDefaults(s) {
   out.notify ??= true;
   out.allUsers ??= false;
   out.keepInstallers ??= false;
+  out.installDir ??= '';
+  out.folders = Array.isArray(out.folders) ? out.folders : [];
+  out.homeOrder = Array.isArray(out.homeOrder) ? out.homeOrder : [];
+  out.hidden = Array.isArray(out.hidden) ? out.hidden : [];
+  out.discoverFilter ||= 'all';
+  out.discoverSort ||= 'default';
   return out;
 }
 function saveSettings() {
@@ -51,11 +59,7 @@ function latest(id) {
   const list = hub.releases[id] || [];
   return list.find((r) => !r.prerelease) || list[0] || null;
 }
-function assetFor(app) {
-  const rel = latest(app.id);
-  return rel ? C.pickAsset(app, rel.assets, hub.sys) : null;
-}
-/** kind: web | none | installed | update | unavailable */
+/** kind: web | none | installed | update | unavailable | unknown */
 function status(app) {
   if (!app.repo) return { kind: 'web' };
   const have = hub.installed[app.id];
@@ -71,7 +75,7 @@ function status(app) {
 }
 const activeJob = (id) => {
   const j = hub.jobs[id];
-  return j && ['queued', 'download', 'install', 'uninstall'].includes(j.phase) ? j : null;
+  return j && ['queued', 'download', 'install', 'uninstall', 'move'].includes(j.phase) ? j : null;
 };
 function updateList() {
   return C.APPS.filter((a) => status(a).kind === 'update');
@@ -89,6 +93,20 @@ function humanSize(n) {
 const fmtDate = (d) => (d ? new Date(d).toLocaleDateString(settings.language, { day: 'numeric', month: 'long', year: 'numeric' }) : '');
 const iconImg = (app, size) => h('img', { class: 'app-ico', src: `${ASSETS}/icons/${app.id}.png`, width: size, height: size, alt: '', draggable: 'false' });
 
+/** Liegt der Ordner eines installierten Programms im gemeinsamen Installationsordner? */
+function inInstallDir(have) {
+  if (!settings.installDir || !have || !have.location) return true;
+  const norm = (p) => String(p).replace(/[\\/]+$/, '').replace(/\//g, '\\').toLowerCase();
+  const base = norm(settings.installDir);
+  const loc = norm(have.location);
+  return loc === base || loc.startsWith(`${base}\\`);
+}
+/** Installierte Programme, die (noch) nicht im gemeinsamen Ordner liegen */
+function outsideInstallDir() {
+  if (info.platform !== 'win32' || !settings.installDir) return [];
+  return C.APPS.filter((a) => hub.installed[a.id] && !inInstallDir(hub.installed[a.id]) && (hub.installed[a.id].managed || ['inno', 'nsis'].includes(a.win?.kind)));
+}
+
 // ---------------------------------------------------------------- Aktionen
 async function doInstall(app) {
   await api.install(app.id);
@@ -105,6 +123,22 @@ async function doOpen(app) {
   if (!ok) toast(t('errOpen'), { kind: 'error' });
 }
 const openWeb = (url) => api.openExternal(url);
+/** Web-App im eigenen Fenster (wie mit Webline geöffnet) */
+const openWebApp = (app, url) => api.web(app.id, url || app.web);
+async function askMove(apps) {
+  if (!apps.length) return;
+  const r = await confirm(t('moveTitle'), t('moveMsg', { list: apps.map((a) => a.name).join(', '), dir: settings.installDir }), [
+    { label: t('cancel'), value: 'cancel' },
+    { label: t('move'), value: 'ok', primary: true },
+  ]);
+  if (r === 'ok') await api.move(apps.map((a) => a.id));
+}
+/** Kachel auf der Startseite anklicken: Programm oder Web-App starten */
+function launch(app) {
+  if (app.category === 'web') return openWebApp(app);
+  if (hub.installed[app.id]) return doOpen(app);
+  return go('app', app.id);
+}
 
 /** Hauptknopf einer App, je nach Zustand. compact = Kachel */
 function actionNode(app, compact) {
@@ -112,19 +146,19 @@ function actionNode(app, compact) {
   const job = activeJob(app.id);
   if (job) {
     const pct = job.total ? Math.min(100, Math.round((job.got / job.total) * 100)) : 0;
-    const label = job.phase === 'queued' ? t('queued') : job.phase === 'download' ? t('downloading', { pct }) : job.phase === 'uninstall' ? t('removing') : t('installing');
-    const bar = h('div', { class: `progress${job.phase === 'install' || job.phase === 'uninstall' ? ' busy' : ''}` }, h('i', { style: { width: `${job.phase === 'download' ? pct : 100}%` } }));
+    const label = job.phase === 'queued' ? t('queued') : job.phase === 'download' ? t('downloading', { pct }) : job.phase === 'uninstall' ? t('removing') : job.phase === 'move' ? t('moving') : t('installing');
+    const bar = h('div', { class: `progress${['install', 'uninstall', 'move'].includes(job.phase) ? ' busy' : ''}` }, h('i', { style: { width: `${job.phase === 'download' ? pct : 100}%` } }));
     wrap.append(h('div', { class: 'job' }, h('span', { class: 'job-label', text: label }), bar));
     if (job.phase === 'queued' || job.phase === 'download') wrap.append(h('button', { class: 'icon-btn small', title: t('cancel'), onclick: (e) => { e.stopPropagation(); api.cancel(app.id); } }, icon('close', 15)));
     return wrap;
   }
   const s = status(app);
   const btn = (label, cls, run) => h('button', { class: `btn ${cls}`, onclick: (e) => { e.stopPropagation(); run(); } }, label);
-  if (s.kind === 'web') wrap.append(btn(t('openInBrowser'), 'primary', () => openWeb(app.web)));
+  if (s.kind === 'web') wrap.append(btn(t('open'), 'primary', () => openWebApp(app)));
   else if (s.kind === 'update') wrap.append(btn(t('update'), 'primary', () => doInstall(app)));
   else if (s.kind === 'installed') wrap.append(btn(t('open'), '', () => doOpen(app)));
   else if (s.kind === 'none') wrap.append(btn(hub.sys.platform === 'win32' || app.win?.kind === 'portable' ? t('install') : t('download'), 'primary', () => doInstall(app)));
-  else if (s.kind === 'unavailable' && app.web) wrap.append(btn(t('openInBrowser'), '', () => openWeb(app.web)));
+  else if (s.kind === 'unavailable' && app.web) wrap.append(btn(t('openAsApp'), '', () => openWebApp(app)));
   else if (s.kind === 'unknown') wrap.append(h('span', { class: 'muted small', text: hub.checked ? '' : t('loading') }));
   return wrap;
 }
@@ -135,14 +169,14 @@ function statusLine(app) {
     return h('span', { class: 'st error', title: msg }, icon('alert', 13), h('span', { class: 'st-msg', text: msg }));
   }
   const s = status(app);
-  if (s.kind === 'web') return h('span', { class: 'st' }, t('runsInBrowser'));
+  if (s.kind === 'web') return h('span', { class: 'st' }, t('webApp'));
   if (s.kind === 'update') return h('span', { class: 'st up' }, t('fromTo', { from: s.have.version, to: ver(s.rel.tag) }));
   if (s.kind === 'installed') return h('span', { class: 'st ok' }, t('installedVersion', { version: s.have.version }));
   if (s.kind === 'none' || s.kind === 'unavailable') return h('span', { class: 'st' }, `${t('notInstalled')}${shown(s.rel) ? ` · ${shown(s.rel)}` : ''}`);
   return h('span', { class: 'st' }, '');
 }
 
-// ---------------------------------------------------------------- Kacheln
+// ---------------------------------------------------------------- Katalog-Kacheln
 function card(app) {
   return h('div', { class: `card${app.legacy ? ' legacy' : ''}`, tabindex: '0', 'data-app': app.id, onclick: () => go('app', app.id), onkeydown: (e) => { if (e.key === 'Enter') go('app', app.id); } },
     h('div', { class: 'card-top' }, iconImg(app, 52),
@@ -163,7 +197,285 @@ function matches(app, q) {
   return q.toLowerCase().split(/\s+/).filter(Boolean).every((w) => hay.includes(w));
 }
 
-// ---------------------------------------------------------------- Ansichten
+// ---------------------------------------------------------------- Meine Programme: Kacheln, Ordner, Reihenfolge
+const folderById = (id) => settings.folders.find((f) => f.id === id);
+const folderOf = (appId) => settings.folders.find((f) => f.apps.includes(appId));
+/** Was auf "Meine Programme" gehört: installierte Programme und Web-Apps (außer ausgeblendeten) */
+function homeApps() {
+  return C.APPS.filter((a) => (hub.installed[a.id] || a.category === 'web') && !settings.hidden.includes(a.id));
+}
+const appKey = (id) => id;
+const folderKey = (id) => `f:${id}`;
+/** Einträge der obersten Ebene in der gespeicherten Reihenfolge: Ordner und Apps ohne Ordner */
+function topEntries() {
+  const visible = homeApps();
+  const entries = [
+    ...settings.folders.map((f) => ({ key: folderKey(f.id), folder: f })),
+    ...visible.filter((a) => !folderOf(a.id)).map((a) => ({ key: appKey(a.id), app: a })),
+  ];
+  const pos = (k) => {
+    const i = settings.homeOrder.indexOf(k);
+    return i < 0 ? 1e6 : i;
+  };
+  return entries.map((e, i) => [e, i]).sort((x, y) => pos(x[0].key) - pos(y[0].key) || x[1] - y[1]).map(([e]) => e);
+}
+function folderApps(f) {
+  const visible = new Set(homeApps().map((a) => a.id));
+  return f.apps.filter((id) => visible.has(id) && C.byId[id]).map((id) => C.byId[id]);
+}
+/** aktuelle Reihenfolge festschreiben (damit neue Einträge hinten landen) */
+function commitOrder(keys) {
+  settings.homeOrder = keys;
+  saveSettings();
+}
+function newFolderId() {
+  let i = 1;
+  while (folderById(`f${i}`)) i++;
+  return `f${i}`;
+}
+async function createFolder(withApp) {
+  const name = await prompt(t('newFolder'), t('folderName'), t('folderDefault'), { okLabel: 'OK', cancelLabel: t('cancel') });
+  if (name == null) return null;
+  return addFolder(name.trim() || t('folderDefault'), withApp);
+}
+function addFolder(name, withApp) {
+  const id = newFolderId();
+  if (withApp) removeFromFolders(withApp);
+  settings.folders.push({ id, name, apps: withApp ? [withApp] : [] });
+  const keys = topEntries().map((e) => e.key).filter((k) => k !== folderKey(id) && k !== appKey(withApp));
+  commitOrder([...keys, folderKey(id)]);
+  render();
+  return id;
+}
+function removeFromFolders(appId) {
+  for (const f of settings.folders) f.apps = f.apps.filter((x) => x !== appId);
+}
+function moveToFolder(appId, folderId) {
+  const f = folderById(folderId);
+  if (!f) return;
+  removeFromFolders(appId);
+  f.apps.push(appId);
+  saveSettings();
+  render();
+}
+function takeOutOfFolder(appId) {
+  const f = folderOf(appId);
+  if (!f) return;
+  const keys = topEntries().map((e) => e.key);
+  removeFromFolders(appId);
+  // direkt hinter dem Ordner einsortieren
+  const i = keys.indexOf(folderKey(f.id));
+  keys.splice(i + 1, 0, appKey(appId));
+  commitOrder(keys);
+  render();
+}
+async function renameFolder(f) {
+  const name = await prompt(t('rename'), t('folderName'), f.name, { okLabel: 'OK', cancelLabel: t('cancel') });
+  if (name == null || !name.trim()) return;
+  f.name = name.trim();
+  saveSettings();
+  render();
+}
+async function deleteFolder(f) {
+  const r = await confirm(t('deleteFolder'), t('deleteFolderMsg'), [{ label: t('cancel'), value: 'cancel' }, { label: t('deleteFolder'), value: 'ok', danger: true }]);
+  if (r !== 'ok') return;
+  const keys = topEntries().map((e) => e.key);
+  const i = keys.indexOf(folderKey(f.id));
+  keys.splice(i, 1, ...f.apps.map(appKey));
+  settings.folders = settings.folders.filter((x) => x !== f);
+  commitOrder(keys);
+  if (view === 'folder' && currentFolder === f.id) go('home');
+  else render();
+}
+
+/** Ziehen & Ablegen: Kachel auf Ordner (hinein), auf Kachel (davor/dahinter), auf "Meine Programme" (aus Ordner) */
+let dragKey = null;
+function dragSource(el, key) {
+  el.setAttribute('draggable', 'true');
+  el.addEventListener('dragstart', (e) => {
+    dragKey = key;
+    e.dataTransfer.effectAllowed = 'move';
+    e.dataTransfer.setData('text/plain', key);
+    requestAnimationFrame(() => el.classList.add('dragging'));
+  });
+  el.addEventListener('dragend', () => {
+    dragKey = null;
+    el.classList.remove('dragging');
+    document.querySelectorAll('.drop-into, .drop-before, .drop-after').forEach((x) => x.classList.remove('drop-into', 'drop-before', 'drop-after'));
+  });
+}
+function dropTarget(el, { accepts, onDrop, side }) {
+  const clear = () => el.classList.remove('drop-into', 'drop-before', 'drop-after');
+  const where = (e) => {
+    if (!side) return 'into';
+    const r = el.getBoundingClientRect();
+    return e.clientX < r.left + r.width / 2 ? 'before' : 'after';
+  };
+  el.addEventListener('dragover', (e) => {
+    const k = dragKey || e.dataTransfer.getData('text/plain');
+    if (!k || !accepts(k)) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+    clear();
+    el.classList.add(`drop-${where(e)}`);
+  });
+  el.addEventListener('dragleave', (e) => {
+    if (!el.contains(e.relatedTarget)) clear();
+  });
+  el.addEventListener('drop', (e) => {
+    const k = dragKey || e.dataTransfer.getData('text/plain');
+    clear();
+    if (!k || !accepts(k)) return;
+    e.preventDefault();
+    e.stopPropagation();
+    onDrop(k, where(e));
+  });
+}
+/** Reihenfolge der obersten Ebene: k vor/hinter target */
+function reorderTop(k, targetKey, where) {
+  const appId = k.startsWith('f:') ? null : k;
+  if (appId && folderOf(appId)) removeFromFolders(appId);
+  const keys = topEntries().map((e) => e.key).filter((x) => x !== k);
+  let i = keys.indexOf(targetKey);
+  if (i < 0) i = keys.length;
+  keys.splice(where === 'after' ? i + 1 : i, 0, k);
+  commitOrder(keys);
+  render();
+}
+/** Reihenfolge innerhalb eines Ordners */
+function reorderInFolder(f, appId, targetId, where) {
+  removeFromFolders(appId);
+  const i = f.apps.indexOf(targetId);
+  f.apps.splice(i < 0 ? f.apps.length : where === 'after' ? i + 1 : i, 0, appId);
+  saveSettings();
+  render();
+}
+
+function tile(app, folder) {
+  const s = status(app);
+  const job = activeJob(app.id);
+  const el = h('div', { class: `tile${app.legacy ? ' legacy' : ''}`, tabindex: '0', 'data-app': app.id, title: txt(app.tagline),
+    onclick: () => launch(app),
+    onkeydown: (e) => { if (e.key === 'Enter') launch(app); },
+    oncontextmenu: (e) => { e.preventDefault(); tileMenu(app, folder, e.clientX, e.clientY); } },
+  h('div', { class: 'tile-ico' }, iconImg(app, 60), s.kind === 'update' ? h('span', { class: 'tile-dot', title: t('update') }) : null),
+  h('div', { class: 'tile-name', text: app.name }),
+  job ? h('div', { class: `progress tile-progress${job.phase === 'download' ? '' : ' busy'}`, 'data-tilejob': app.id }, h('i', { style: { width: `${job.phase === 'download' && job.total ? Math.round((job.got / job.total) * 100) : 100}%` } })) : null,
+  h('button', { class: 'icon-btn small tile-more menu-anchor', title: t('more'), onclick: (e) => {
+    e.stopPropagation();
+    const r = e.currentTarget.getBoundingClientRect();
+    e.currentTarget.classList.add('open');
+    tileMenu(app, folder, r.right, r.bottom + 4, true);
+  } }, icon('more', 16)));
+  dragSource(el, appKey(app.id));
+  if (folder) dropTarget(el, { side: true, accepts: (k) => !k.startsWith('f:') && k !== app.id, onDrop: (k, where) => reorderInFolder(folder, k, app.id, where) });
+  else dropTarget(el, { side: true, accepts: (k) => k !== app.id, onDrop: (k, where) => reorderTop(k, appKey(app.id), where) });
+  return el;
+}
+
+function folderTile(f) {
+  const apps = folderApps(f);
+  const el = h('div', { class: 'tile folder', tabindex: '0', 'data-folder': f.id,
+    onclick: () => go('folder', f.id),
+    onkeydown: (e) => { if (e.key === 'Enter') go('folder', f.id); },
+    oncontextmenu: (e) => { e.preventDefault(); folderMenu(f, e.clientX, e.clientY); } },
+  h('div', { class: 'folder-ico' }, apps.slice(0, 4).map((a) => iconImg(a, 26))),
+  h('div', { class: 'tile-name' }, h('span', { text: f.name }), h('span', { class: 'tile-count', text: String(apps.length) })),
+  h('button', { class: 'icon-btn small tile-more menu-anchor', title: t('more'), onclick: (e) => {
+    e.stopPropagation();
+    const r = e.currentTarget.getBoundingClientRect();
+    e.currentTarget.classList.add('open');
+    folderMenu(f, r.right, r.bottom + 4, true);
+  } }, icon('more', 16)));
+  dragSource(el, folderKey(f.id));
+  // Programm auf den Ordner: hinein; Ordner auf den Ordner: Reihenfolge
+  dropTarget(el, { side: false, accepts: (k) => k !== folderKey(f.id), onDrop: (k) => (k.startsWith('f:') ? reorderTop(k, folderKey(f.id), 'before') : moveToFolder(k, f.id)) });
+  return el;
+}
+
+function tileMenu(app, folder, x, y, alignRight = false) {
+  const s = status(app);
+  const have = hub.installed[app.id];
+  const items = [{ label: t('open'), run: () => launch(app) }];
+  if (s.kind === 'update' && !activeJob(app.id)) items.push({ label: t('update'), run: () => doInstall(app) });
+  items.push({ label: t('details'), run: () => go('app', app.id) });
+  items.push('-');
+  const folderItems = settings.folders.filter((f) => f !== folder).map((f) => ({ label: f.name, run: () => moveToFolder(app.id, f.id) }));
+  items.push({ label: t('moveToFolder'), submenu: [...folderItems, ...(folderItems.length ? ['-'] : []), { label: `${t('newFolder')} …`, run: () => createFolder(app.id) }] });
+  if (folder) items.push({ label: t('removeFromFolder'), run: () => takeOutOfFolder(app.id) });
+  if (app.category === 'web') items.push({ label: t('hideFromHome'), run: () => { settings.hidden = [...settings.hidden, app.id]; removeFromFolders(app.id); saveSettings(); render(); } });
+  if (have && hub.sys.platform === 'win32' && !activeJob(app.id)) {
+    items.push('-');
+    items.push({ label: t('showInFolder'), run: () => api.reveal(app.id) });
+    if (!inInstallDir(have)) items.push({ label: t('moveHere'), run: () => askMove([app]) });
+    items.push({ label: t('uninstall'), run: () => doUninstall(app) });
+  }
+  showMenu(items, x, y, { alignRight });
+}
+function folderMenu(f, x, y, alignRight = false) {
+  showMenu([
+    { label: t('open'), run: () => go('folder', f.id) },
+    { label: t('rename'), run: () => renameFolder(f) },
+    '-',
+    { label: t('deleteFolder'), run: () => deleteFolder(f) },
+  ], x, y, { alignRight });
+}
+
+function newFolderButton() {
+  const b = h('button', { class: 'btn', id: 'new-folder', onclick: () => createFolder() }, icon('folder', 15), t('newFolder'));
+  // Programm auf "Neuer Ordner" ziehen: Ordner mit diesem Programm anlegen
+  dropTarget(b, { accepts: (k) => !k.startsWith('f:'), onDrop: (k) => createFolder(k) });
+  return b;
+}
+
+function viewHome() {
+  const out = [];
+  const ups = updateList();
+  if (ups.length) {
+    out.push(h('div', { class: 'banner' }, icon('updates', 18), h('span', { text: ups.length === 1 ? t('updates1') : t('updatesN', { n: ups.length }) }),
+      h('span', { class: 'spacer' }),
+      h('button', { class: 'btn', onclick: () => go('updates') }, t('updates')),
+      h('button', { class: 'btn primary', onclick: () => ups.forEach((a) => api.install(a.id)) }, t('updateAll'))));
+  }
+  const entries = topEntries();
+  const head = h('div', { class: 'sect-head' }, h('h2', { text: t('myApps') }), newFolderButton());
+  if (!entries.length) {
+    out.push(h('section', { class: 'sect' }, head, h('div', { class: 'empty' }, icon('apps', 28), h('p', { text: hub.checked ? t('homeEmpty') : t('loading') }),
+      h('button', { class: 'btn primary', onclick: () => go('discover') }, t('discover')))));
+    return out;
+  }
+  const tiles = h('div', { class: 'tiles' }, entries.map((e) => (e.folder ? folderTile(e.folder) : tile(e.app, null))));
+  out.push(h('section', { class: 'sect' }, head, tiles, h('p', { class: 'hint muted small', text: t('dragHint') })));
+  const hidden = settings.hidden.filter((id) => C.byId[id]);
+  if (hidden.length) {
+    out.push(h('div', { class: 'hidden-row muted small' }, hidden.map((id) => h('button', { class: 'btn ghost small-btn', title: t('addToHome'), onclick: () => { settings.hidden = settings.hidden.filter((x) => x !== id); saveSettings(); render(); } }, `+ ${C.byId[id].name}`))));
+  }
+  return out;
+}
+
+function viewFolder(f) {
+  if (!f) return viewHome();
+  const crumb = h('button', { class: 'btn ghost crumb', onclick: () => go('home') }, icon('back', 16), t('myApps'));
+  // Kachel auf "Meine Programme" ziehen: aus dem Ordner nehmen
+  dropTarget(crumb, { accepts: (k) => !k.startsWith('f:') && f.apps.includes(k), onDrop: (k) => takeOutOfFolder(k) });
+  const apps = folderApps(f);
+  const head = h('div', { class: 'sect-head' }, h('h2', {}, icon('folder', 16), h('span', { text: f.name })),
+    h('button', { class: 'icon-btn menu-anchor', title: t('more'), onclick: (e) => { const r = e.currentTarget.getBoundingClientRect(); e.currentTarget.classList.add('open'); folderMenu(f, r.right, r.bottom + 4, true); } }, icon('more', 18)));
+  const body = apps.length ? h('div', { class: 'tiles' }, apps.map((a) => tile(a, f))) : h('div', { class: 'empty' }, icon('folder', 28), h('p', { text: t('dragHint') }));
+  return [h('div', { class: 'back-row' }, crumb), h('section', { class: 'sect folder-view' }, head, body)];
+}
+
+// ---------------------------------------------------------------- Entdecken (ein Tab: Filter + Sortierung)
+const FILTERS = [['all', 'all'], ['apps', 'programs'], ['games', 'games'], ['web', 'inBrowser']];
+function sortedApps(list) {
+  const out = [...list];
+  if (settings.discoverSort === 'name') out.sort((a, b) => a.name.localeCompare(b.name, settings.language));
+  else if (settings.discoverSort === 'updated') {
+    const d = (a) => (latest(a.id) ? new Date(latest(a.id).date).getTime() || 0 : 0);
+    out.sort((a, b) => d(b) - d(a) || a.name.localeCompare(b.name));
+  }
+  return out;
+}
 function viewDiscover() {
   const ups = updateList();
   const out = [];
@@ -173,14 +485,24 @@ function viewDiscover() {
       h('button', { class: 'btn', onclick: () => go('updates') }, t('updates')),
       h('button', { class: 'btn primary', onclick: () => ups.forEach((a) => api.install(a.id)) }, t('updateAll'))));
   }
-  out.push(section(t('programs'), C.APPS.filter((a) => a.category === 'apps')));
-  out.push(section(t('games'), C.APPS.filter((a) => a.category === 'games')));
-  out.push(section(t('inBrowser'), C.APPS.filter((a) => a.category === 'web')));
+  const bar = h('div', { class: 'toolbar' },
+    h('div', { class: 'chips' }, FILTERS.map(([f, label]) => h('button', { class: `fchip${settings.discoverFilter === f ? ' on' : ''}`, 'data-filter': f, onclick: () => { settings.discoverFilter = f; saveSettings(); render(); } }, t(label)))),
+    h('span', { class: 'spacer' }),
+    h('label', { class: 'sort' }, h('span', { class: 'muted small', text: t('sortBy') }),
+      h('select', { id: 'sort', onchange: (e) => { settings.discoverSort = e.target.value; saveSettings(); render(); } },
+        [['default', t('sortDefault')], ['name', t('sortName')], ['updated', t('sortUpdated')]].map(([v, l]) => h('option', { value: v, selected: settings.discoverSort === v ? 'selected' : null }, l)))));
+  out.push(bar);
+  const f = settings.discoverFilter;
+  if (f === 'all' && settings.discoverSort === 'default') {
+    out.push(section(t('programs'), C.APPS.filter((a) => a.category === 'apps' && !a.legacy)));
+    out.push(section(t('games'), C.APPS.filter((a) => a.category === 'games' && !a.legacy)));
+    out.push(section(t('inBrowser'), C.APPS.filter((a) => a.category === 'web')));
+    out.push(section(t('legacy'), C.APPS.filter((a) => a.legacy)));
+  } else {
+    const list = C.APPS.filter((a) => f === 'all' || a.category === f);
+    out.push(h('section', { class: 'sect' }, grid(sortedApps(list))));
+  }
   return out;
-}
-function viewCategory(cat) {
-  const title = { apps: t('programs'), games: t('games'), web: t('inBrowser') }[cat];
-  return [section(title, C.APPS.filter((a) => a.category === cat))];
 }
 function viewSearch() {
   const hits = C.APPS.filter((a) => matches(a, query));
@@ -193,13 +515,6 @@ function row(app, right) {
     iconImg(app, 40),
     h('div', { class: 'row-txt' }, h('div', { class: 'row-name', text: app.name }), statusLine(app)),
     right);
-}
-function viewInstalled() {
-  const list = C.APPS.filter((a) => hub.installed[a.id] || activeJob(a.id)?.phase === 'uninstall');
-  if (!list.length) return [h('div', { class: 'empty' }, icon('installed', 28), h('p', { text: hub.checked ? t('nothingInstalled') : t('loading') }))];
-  return [h('section', { class: 'sect' }, h('div', { class: 'sect-head' }, h('h2', { text: t('installed') })),
-    h('div', { class: 'rows' }, list.map((app) => row(app, h('div', { class: 'row-end' }, actionNode(app),
-      hub.installed[app.id] && !activeJob(app.id) ? h('button', { class: 'icon-btn menu-anchor', title: t('more'), onclick: (e) => { e.stopPropagation(); moreMenu(app, e.currentTarget); } }, icon('more', 18)) : null)))))];
 }
 function viewUpdates() {
   const ups = updateList();
@@ -223,6 +538,7 @@ function moreMenu(app, anchor) {
   const items = [];
   if (have && hub.sys.platform === 'win32' && !activeJob(app.id)) {
     items.push({ label: t('showInFolder'), run: () => api.reveal(app.id) });
+    if (!inInstallDir(have)) items.push({ label: t('moveHere'), run: () => askMove([app]) });
     items.push('-');
     items.push({ label: t('uninstall'), run: () => doUninstall(app) });
   }
@@ -238,10 +554,8 @@ function viewApp(app) {
   const rel = latest(app.id);
   const out = [];
   const actions = h('div', { class: 'hero-actions' }, actionNode(app));
-  if (s.kind === 'installed' || s.kind === 'update') {
-    if (s.kind === 'update' && !activeJob(app.id)) actions.append(h('button', { class: 'btn', onclick: () => doOpen(app) }, t('open')));
-  }
-  if (app.web && s.kind !== 'web' && s.kind !== 'unavailable') actions.append(h('button', { class: 'btn', onclick: () => openWeb(app.web) }, icon('web', 15), t(app.category === 'games' ? 'openInBrowser' : 'alsoInBrowser')));
+  if (s.kind === 'update' && !activeJob(app.id)) actions.append(h('button', { class: 'btn', onclick: () => doOpen(app) }, t('open')));
+  if (app.web && s.kind !== 'web' && s.kind !== 'unavailable') actions.append(h('button', { class: 'btn', onclick: () => openWebApp(app) }, icon('web', 15), t('openAsApp')));
   actions.append(h('button', { class: 'icon-btn menu-anchor', title: t('more'), onclick: (e) => moreMenu(app, e.currentTarget) }, icon('more', 18)));
 
   const meta = h('div', { class: 'hero-meta' });
@@ -252,7 +566,8 @@ function viewApp(app) {
     if (s.asset) chip(t('size'), humanSize(s.asset.size));
     chip(t('systems'), systemsOf(app, rel));
     chip(t('license'), 'Apache 2.0');
-  } else chip('', t('runsInBrowser'));
+    if (s.have && s.have.location && hub.sys.platform === 'win32') chip(t('location'), s.have.location);
+  } else chip('', t('webApp'));
 
   out.push(h('div', { class: 'hero', style: { '--app': app.color } },
     iconImg(app, 96),
@@ -338,10 +653,9 @@ function lightbox(list, start) {
 }
 
 // ---------------------------------------------------------------- Gerüst
-const NAV = [
-  ['discover', 'discover'], ['apps', 'apps'], ['games', 'games'], ['web', 'web'], '-', ['installed', 'installed'], ['updates', 'updates'],
-];
-const NAV_LABEL = { discover: 'discover', apps: 'programs', games: 'games', web: 'inBrowser', installed: 'installed', updates: 'updates' };
+// Nur drei Bereiche: Meine Programme, Entdecken (mit Filter/Sortierung), Updates
+const NAV = [['home', 'home'], ['discover', 'discover'], '-', ['updates', 'updates']];
+const NAV_LABEL = { home: 'myApps', discover: 'discover', updates: 'updates' };
 
 function buildShell() {
   const app = $('#app');
@@ -369,6 +683,7 @@ function go(next, id) {
     if (view !== 'app') lastList = view;
     current = id;
   }
+  if (next === 'folder') currentFolder = id;
   view = next;
   render({ top: true });
 }
@@ -381,21 +696,23 @@ function render({ top = false } = {}) {
   if (query && view !== 'app') nodes = viewSearch();
   else if (view === 'app' && C.byId[current]) {
     nodes = [h('div', { class: 'back-row' }, h('button', { class: 'btn ghost', onclick: () => go(lastList) }, icon('back', 16), t('back'))), ...viewApp(C.byId[current])];
-  } else if (view === 'installed') nodes = viewInstalled();
+  } else if (view === 'folder') nodes = viewFolder(folderById(currentFolder));
   else if (view === 'updates') nodes = viewUpdates();
-  else if (['apps', 'games', 'web'].includes(view)) nodes = viewCategory(view);
-  else nodes = viewDiscover();
+  else if (view === 'discover') nodes = viewDiscover();
+  else nodes = viewHome();
   v.replaceChildren(h('div', { class: `page${view === 'app' && !query ? ' app-page' : ''}` }, nodes));
   v.scrollTop = top ? 0 : scroll;
   // Leiste
-  const sel = view === 'app' ? lastList : view;
+  const sel = view === 'app' ? (lastList === 'folder' ? 'home' : lastList) : view === 'folder' ? 'home' : view;
   for (const b of document.querySelectorAll('.nav-btn[data-view]')) {
     b.classList.toggle('on', !query && b.dataset.view === sel);
     const c = b.querySelector('.count');
-    const n = b.dataset.view === 'updates' ? updateList().length : b.dataset.view === 'installed' ? Object.keys(hub.installed).length : 0;
+    const n = b.dataset.view === 'updates' ? updateList().length : 0;
     c.textContent = n ? String(n) : '';
     c.classList.toggle('hot', b.dataset.view === 'updates' && n > 0);
   }
+  // offener Einstellungsdialog: Angebot "verschieben" aktuell halten
+  if (refreshDirOption) refreshDirOption();
   const ck = $('#checked');
   if (hub.error) {
     ck.textContent = t(hub.error === 'limit' ? 'errLimit' : 'errOffline');
@@ -411,6 +728,8 @@ function patchJob(id) {
   const app = C.byId[id];
   if (!app) return;
   for (const el of document.querySelectorAll(`[data-job="${id}"]`)) el.replaceWith(actionNode(app, el.classList.contains('compact')));
+  const j = hub.jobs[id];
+  for (const el of document.querySelectorAll(`[data-tilejob="${id}"] i`)) el.style.width = `${j && j.total ? Math.round((j.got / j.total) * 100) : 0}%`;
 }
 
 async function refresh(force) {
@@ -425,6 +744,37 @@ async function refresh(force) {
 }
 
 // ---------------------------------------------------------------- Einstellungen
+let refreshDirOption = null;
+function installDirOption() {
+  if (info.platform !== 'win32') return null;
+  const wrap = h('div', { class: 'opt', id: 'install-dir' });
+  const fill = () => {
+    if (!wrap.isConnected && refreshDirOption === fill && wrap.childNodes.length) {
+      refreshDirOption = null;
+      return;
+    }
+    const outside = outsideInstallDir();
+    wrap.replaceChildren(
+      h('span', { class: 'lbl', text: t('installDir') }),
+      h('div', { class: 'dir-row' },
+        h('span', { class: `dir-path${settings.installDir ? '' : ' muted'}`, title: settings.installDir, text: settings.installDir || t('installDirDefault') }),
+        h('button', { class: 'btn', id: 'pick-dir', onclick: async () => {
+          const d = await api.pickDir(settings.installDir);
+          if (!d) return;
+          settings.installDir = d;
+          saveSettings();
+          fill();
+          render();
+        } }, t('change')),
+        settings.installDir ? h('button', { class: 'btn', onclick: () => { settings.installDir = ''; saveSettings(); fill(); render(); } }, t('useDefault')) : null),
+      h('small', { class: 'muted', text: t('installDirHint') }),
+      outside.length ? h('button', { class: 'btn primary', id: 'move-all', onclick: () => askMove(outside) }, t('moveAll', { n: outside.length })) : null);
+  };
+  fill();
+  refreshDirOption = fill;
+  return wrap;
+}
+
 function openSettings() {
   const sel = (key, options, onChange) => h('select', { onchange: (e) => { settings[key] = e.target.value; saveSettings(); onChange && onChange(); } },
     options.map(([v, label]) => h('option', { value: v, selected: settings[key] === v ? 'selected' : null }, label)));
@@ -443,6 +793,7 @@ function openSettings() {
     h('div', { class: 'opt' }, h('span', { class: 'lbl', text: t('style') }), sel('look', [['standard', t('styleStandard')], ['acryl', t('styleAcryl')]], theme)),
     h('div', { class: 'opt' }, h('span', { class: 'lbl', text: t('accent') }), swatches),
     h('div', { class: 'sep' }),
+    installDirOption(),
     tog('checkOnStart', t('checkOnStart')),
     tog('notify', t('notifyUpdates')),
     info.platform === 'win32' ? tog('allUsers', t('allUsers'), t('allUsersHint')) : null,
@@ -473,7 +824,8 @@ document.addEventListener('keydown', (e) => {
       $('#search').value = '';
       render();
     } else if (view === 'app') go(lastList);
-  } else if (e.altKey && e.key === 'ArrowLeft' && view === 'app') go(lastList);
+    else if (view === 'folder') go('home');
+  } else if (e.altKey && e.key === 'ArrowLeft' && (view === 'app' || view === 'folder')) go(view === 'app' ? lastList : 'home');
   else if ((e.key === 'F5' || ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'r')) && !e.shiftKey) {
     e.preventDefault();
     refresh(true);
@@ -506,7 +858,7 @@ async function boot() {
     lastJobs[id] = job;
     if (job && job.phase === 'done' && (!prev || prev.phase !== 'done')) {
       const app = C.byId[id];
-      const msg = job.result === 'removed' ? t('doneRemoved', { app: app.name }) : job.result === 'updated' ? t('doneUpdated', { app: app.name, version: job.version }) : job.result === 'opened' ? t('doneOpened') : t('doneInstalled', { app: app.name });
+      const msg = job.result === 'removed' ? t('doneRemoved', { app: app.name }) : job.result === 'updated' ? t('doneUpdated', { app: app.name, version: job.version }) : job.result === 'moved' ? t('doneMoved', { app: app.name }) : job.result === 'opened' ? t('doneOpened') : t('doneInstalled', { app: app.name });
       toast(msg, { ms: job.result === 'opened' ? 5000 : 2600 });
       setTimeout(() => api.dismiss(id), 400);
     }
@@ -520,5 +872,15 @@ async function boot() {
   window.__ready = true;
 }
 
-window.__hub = { go, get view() { return view; }, get query() { return query; }, setQuery: (q) => { query = q; $('#search').value = q; render(); }, settings: () => settings, setSetting: (k, v) => { settings[k] = v; saveSettings(); theme(); buildShell(); render(); } };
+window.__hub = {
+  go,
+  get view() { return view; },
+  get query() { return query; },
+  setQuery: (q) => { query = q; $('#search').value = q; render(); },
+  settings: () => settings,
+  setSetting: (k, v) => { settings[k] = v; saveSettings(); theme(); buildShell(); render(); },
+  addFolder,
+  moveToFolder,
+  takeOutOfFolder,
+};
 boot();

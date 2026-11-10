@@ -124,7 +124,7 @@ const APPS = [
     shots: ['paint-%L.webp', 'pixel-%L.webp', 'layers-%L.webp', 'effects-%L.webp'],
   },
   {
-    id: 'convert', name: 'Convertline', repo: 'erqf1/convertline', color: '#0ea5e9', category: 'apps', site: `${SITE}/convert/`,
+    id: 'convert', name: 'Convertline', repo: 'erqf1/convertline', color: '#0ea5e9', category: 'apps', legacy: true, site: `${SITE}/convert/`,
     keywords: 'convert converter ffmpeg mp4 mp3 png jpg pdf umwandeln konvertieren',
     win: { kind: 'nsis', names: /^Convertline \d/, exe: 'Convertline.exe' },
     linux: { pkg: 'convertline' }, mac: { app: 'Convertline.app' },
@@ -159,16 +159,21 @@ const APPS = [
     shots: [],
   },
   {
-    id: 'jump', name: 'JumpNDodge', repo: 'erqf1/JumpNDodge', color: '#f97316', category: 'games', legacy: true, site: `${SITE}/jump/`,
-    keywords: 'game jump dodge spiel springen',
-    win: { kind: 'inno', keys: ['{B44A592F-4DB5-4419-BCA6-7C5F80AA4472}_is1'], names: /^JumpNDodge\b/, exe: 'JumpNDodge.exe' },
+    id: 'jump', name: 'JumpNDodge', repo: 'erqf1/JumpNDodge', color: '#f97316', category: 'games', site: `${SITE}/jump/`,
+    keywords: 'game jump dodge spiel springen multiplayer rangliste',
+    // dataDir: Spielstand liegt neben der EXE und wird beim Verschieben mitgenommen
+    win: { kind: 'inno', keys: ['{B44A592F-4DB5-4419-BCA6-7C5F80AA4472}_is1'], names: /^JumpNDodge\b/, exe: 'JumpNDodge.exe', dataDir: 'data' },
     assets: { win: /^JumpNDodge-Windows_Installer\.exe$/ },
     tagline: { en: 'Jump, dodge, survive.', de: 'Springen, ausweichen, überleben.' },
     about: {
-      en: 'The first W Software game. Not supported right now, bugs may occur.',
-      de: 'Das erste Spiel von W Software. Im Moment nicht unterstützt, Bugs können auftreten.',
+      en: 'The first W Software game: jump over obstacles, dodge what falls from above and survive as long as you can. Eight difficulties, powers, cosmetics, a 2-player mode and an online leaderboard.',
+      de: 'Das erste Spiel von W Software: über Hindernisse springen, ausweichen, was von oben kommt, und so lange wie möglich überleben. Acht Schwierigkeiten, Powers, Kosmetik, ein 2-Spieler-Modus und eine Online-Rangliste.',
     },
-    features: [],
+    features: [
+      { en: ['Eight difficulties', 'From Easy to Hell and Dynamic, which gets faster the longer you survive.'], de: ['Acht Schwierigkeiten', 'Von Leicht bis Hölle und Dynamisch, das immer schneller wird, je länger du durchhältst.'] },
+      { en: ['Powers and cosmetics', 'Spin for powers, equip trails, hats and faces and show them off.'], de: ['Powers und Kosmetik', 'Powers erdrehen, Spuren, Hüte und Gesichter ausrüsten und zeigen.'] },
+      { en: ['Together or against each other', '2-player co-op and versus on one keyboard, plus an online leaderboard with friends and squads.'], de: ['Zusammen oder gegeneinander', '2-Spieler-Koop und Versus an einer Tastatur, dazu Online-Rangliste mit Freunden und Squads.'] },
+    ],
     shots: [],
   },
   // ---- im Browser: werden nur geöffnet

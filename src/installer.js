@@ -44,12 +44,14 @@ async function download(url, file, total, onProgress, signal) {
   return `sha256:${hash.digest('hex')}`;
 }
 
-/** Programm starten und auf das Ende warten. Liefert den Exit-Code. */
+/** Programm starten und auf das Ende warten. Liefert den Exit-Code.
+ *  Die Befehlszeile wird wörtlich übergeben (windowsVerbatimArguments): NSIS liest /D= bis zum Zeilenende
+ *  und darf keine Anführungszeichen bekommen, Inno will /DIR="..." mit Anführungszeichen. */
 function runAndWait(exe, args) {
   return new Promise((resolve, reject) => {
     let child;
     try {
-      child = spawn(exe, args, { windowsHide: true, stdio: 'ignore' });
+      child = spawn(exe, args, { windowsHide: true, stdio: 'ignore', windowsVerbatimArguments: true, argv0: `"${exe}"` });
     } catch (e) {
       reject(e);
       return;
@@ -82,12 +84,21 @@ async function runInstaller(exe, args) {
   }
 }
 
-/** Startparameter für einen stillen Installer */
-function installArgs(kind, existing, allUsers) {
+/** Startparameter für einen stillen Installer. dir = eigener Zielordner (sonst entscheidet der Installer) */
+function installArgs(kind, existing, allUsers, dir) {
   const machine = existing ? !!existing.machine : !!allUsers;
-  if (kind === 'inno') return ['/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/SP-', '/CLOSEAPPLICATIONS', machine ? '/ALLUSERS' : '/CURRENTUSER'];
-  if (kind === 'nsis') return ['/S', machine ? '/allusers' : '/currentuser'];
+  const clean = dir ? String(dir).replace(/"/g, '').replace(/[\\/]+$/, '') : '';
+  if (kind === 'inno') return ['/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/SP-', '/CLOSEAPPLICATIONS', machine ? '/ALLUSERS' : '/CURRENTUSER', ...(clean ? [`/DIR="${clean}"`] : [])];
+  // NSIS: /D= muss ganz am Ende stehen und darf keine Anführungszeichen haben (Leerzeichen sind erlaubt)
+  if (kind === 'nsis') return ['/S', machine ? '/allusers' : '/currentuser', ...(clean ? [`/D=${clean}`] : [])];
   return [];
+}
+
+/** Liegt pfad im Ordner basis? (Groß-/Kleinschreibung egal, wie unter Windows) */
+function isInside(p, base) {
+  if (!p || !base) return false;
+  const norm = (x) => path.resolve(String(x)).replace(/[\\/]+$/, '').toLowerCase();
+  return norm(p) === norm(base) || norm(p).startsWith(`${norm(base)}${path.sep}`);
 }
 
 /** Befehlszeile aus der Registry in Programm und Parameter zerlegen */
@@ -106,6 +117,8 @@ async function uninstall(kind, cmd) {
   let args = c.args;
   if (kind === 'inno') args = [...args.filter((a) => !/^\/(SILENT|VERYSILENT)$/i.test(a)), '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART'];
   if (kind === 'nsis' && !args.some((a) => a === '/S')) args = [...args, '/S'];
+  // Teile mit Leerzeichen wieder in Anführungszeichen (die Befehlszeile geht wörtlich raus)
+  args = args.map((a) => (/\s/.test(a) && !a.startsWith('"') ? `"${a}"` : a));
   return runInstaller(c.exe, args);
 }
 
@@ -141,4 +154,4 @@ function launch(exe) {
   return true;
 }
 
-module.exports = { download, runInstaller, installArgs, uninstall, splitCommand, startMenuShortcut, launch };
+module.exports = { download, runInstaller, installArgs, isInside, uninstall, splitCommand, startMenuShortcut, launch };

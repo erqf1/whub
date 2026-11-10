@@ -38,8 +38,9 @@ module.exports = async function siteshots(win, dir) {
       await snap(`app-${lang}`);
       await js(`window.__hub.go('updates')`);
       await snap(`updates-${lang}`);
-      await js(`window.__hub.go('installed')`);
-      await snap(`installed-${lang}`);
+      // Meine Programme mit einem Beispielordner (nur im Test-Benutzerordner gespeichert)
+      await js(`(() => { const s = window.__hub.settings(); s.folders = []; s.homeOrder = []; window.__hub.addFolder('${lang === 'de' ? 'Schule' : 'School'}', 'voca'); window.__hub.moveToFolder('pse', s.folders[0].id); window.__hub.go('home'); })()`);
+      await snap(`home-${lang}`);
     }
     await js(`window.__hub.setSetting('mode', 'light'); window.__hub.setSetting('language', 'de'); window.__hub.go('app', 'pic')`);
     await snap('light-de');

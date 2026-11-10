@@ -93,6 +93,7 @@ function windowsMatch(app, entries) {
     machine: hit.hive === 'HKLM' || /\/allusers/i.test(hit.uninstall || '') || /\(All users\)/i.test(hit.name),
     uninstall: hit.quiet || hit.uninstall || '',
     key: hit.key,
+    location: (hit.location || (exe ? path.dirname(exe) : '')).replace(/^"|"$/g, '').replace(/[\\/]+$/, ''),
   };
 }
 
@@ -141,7 +142,7 @@ async function scan() {
   }
   // von W Hub selbst abgelegte Programme
   for (const [id, info] of Object.entries(managed)) {
-    if (info && info.path && fs.existsSync(info.path)) found[id] = { version: info.version, exe: info.path, managed: true, shortcut: info.shortcut || '' };
+    if (info && info.path && fs.existsSync(info.path)) found[id] = { version: info.version, exe: info.path, managed: true, shortcut: info.shortcut || '', location: path.dirname(info.path) };
     else if (info) setManaged(id, null);
   }
   return found;

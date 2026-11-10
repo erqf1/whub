@@ -226,6 +226,8 @@ export function toast(text, { kind = '', ms = 2600 } = {}) {
   if (!host) document.body.append((host = h('div', { id: 'toasts' })));
   const el = h('div', { class: `toast ${kind}`, text });
   host.append(el);
+  // höchstens drei gleichzeitig (z.B. beim Verschieben vieler Programme)
+  while (host.children.length > 3) host.firstElementChild.remove();
   requestAnimationFrame(() => el.classList.add('in'));
   setTimeout(() => {
     el.classList.remove('in');

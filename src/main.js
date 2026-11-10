@@ -165,6 +165,7 @@ async function pump() {
   busy = true;
   try {
     if (next.action === 'uninstall') await doUninstall(next.id);
+    else if (next.action === 'move') await doMove(next.id);
     else await doInstall(next.id);
   } catch (e) {
     if (state.jobs[next.id] && state.jobs[next.id].phase !== 'canceled') setJob(next.id, { phase: 'error', error: e.code || 'failed', detail: String(e.message || e).slice(0, 200) });
@@ -197,18 +198,32 @@ async function askClose(appDef, existing) {
   return response === 0;
 }
 
-async function doInstall(id) {
+/** Beginnt die Datei wie ein Windows-Programm (MZ)? Vor dem Deinstallieren beim Verschieben geprüft. */
+function isWindowsProgram(file) {
+  try {
+    const fd = fs.openSync(file, 'r');
+    const b = Buffer.alloc(2);
+    fs.readSync(fd, b, 0, 2, 0);
+    fs.closeSync(fd);
+    return b.toString('latin1') === 'MZ';
+  } catch {
+    return false;
+  }
+}
+
+/** Gemeinsamer Installationsordner (nur Windows): <ordner>\<Programmname>, sonst null */
+function targetDir(appDef) {
+  return SYS.platform === 'win32' && settings.installDir ? path.join(settings.installDir, appDef.name) : null;
+}
+
+/** Neuestes Paket laden und prüfen. Liefert { file, asset, version } oder null (abgebrochen). */
+async function fetchPackage(id) {
   const appDef = byId[id];
   const list = state.releases[id] || [];
   const rel = list.find((r) => !r.prerelease) || list[0];
   if (!rel) throw new HubError('norelease');
   const asset = pickAsset(appDef, rel.assets, SYS);
   if (!asset) throw new HubError('noasset');
-  const existing = state.installed[id];
-  if (!(await askClose(appDef, existing))) {
-    setJob(id, { phase: 'canceled' });
-    return;
-  }
   const ctrl = new AbortController();
   controllers[id] = ctrl;
   const file = path.join(downloadDir(), asset.name);
@@ -218,25 +233,42 @@ async function doInstall(id) {
   } catch (e) {
     if (ctrl.signal.aborted) {
       setJob(id, { phase: 'canceled' });
-      return;
+      return null;
     }
-    throw new HubError(e.code === 'size' ? 'download' : 'download', e.message);
+    throw new HubError('download', e.message);
   }
   if (asset.digest && asset.digest.toLowerCase() !== digest) {
     fs.rmSync(file, { force: true });
     throw new HubError('digest');
   }
+  return { file, asset, version: rel.tag.replace(/^v/, '') };
+}
+
+async function doInstall(id) {
+  const appDef = byId[id];
+  const list = state.releases[id] || [];
+  const rel = list.find((r) => !r.prerelease) || list[0];
+  if (!rel) throw new HubError('norelease');
+  if (!pickAsset(appDef, rel.assets, SYS)) throw new HubError('noasset');
+  const existing = state.installed[id];
+  if (!(await askClose(appDef, existing))) {
+    setJob(id, { phase: 'canceled' });
+    return;
+  }
+  const pkg = await fetchPackage(id);
+  if (!pkg) return;
+  const { file, asset, version } = pkg;
   setJob(id, { phase: 'install' });
-  const version = rel.tag.replace(/^v/, '');
   const kind = appDef.win && appDef.win.kind;
   if (SYS.platform === 'win32' && (kind === 'inno' || kind === 'nsis')) {
-    const code = await setup.runInstaller(file, setup.installArgs(kind, existing, settings.allUsers));
+    // Updates bleiben, wo sie sind; neue Installationen kommen in den gemeinsamen Ordner (falls gewählt)
+    const code = await setup.runInstaller(file, setup.installArgs(kind, existing, settings.allUsers, existing ? null : targetDir(appDef)));
     if (!settings.keepInstallers) fs.rmSync(file, { force: true });
     if (code !== 0) throw new HubError('installer', String(code));
     setJob(id, { phase: 'done', result: existing ? 'updated' : 'installed', version });
   } else if (kind === 'portable' || /\.html$/i.test(asset.name)) {
     // ein einzelnes Programm (oder die Offline-Datei): selbst ablegen und merken
-    const dir = path.join(appsDir(), id);
+    const dir = existing && existing.managed ? path.dirname(existing.exe) : targetDir(appDef) || path.join(appsDir(), id);
     fs.mkdirSync(dir, { recursive: true });
     const dest = path.join(dir, /\.html$/i.test(asset.name) ? 'GambelStrike2.html' : appDef.win.exe);
     fs.copyFileSync(file, dest);
@@ -280,6 +312,156 @@ async function doUninstall(id) {
   }
   setJob(id, { phase: 'done', result: 'removed' });
   await rescan();
+}
+
+/** Installiertes Programm in den gemeinsamen Installationsordner bringen.
+ *  Installer-Programme: neuestes Paket laden, still deinstallieren, still in den neuen Ordner installieren
+ *  (Benutzerdaten liegen in AppData und bleiben; Daten neben der EXE - win.dataDir - werden mitkopiert).
+ *  Einzelne EXE: einfach verschieben. */
+async function doMove(id) {
+  const appDef = byId[id];
+  const have = state.installed[id];
+  const dest = targetDir(appDef);
+  if (!have || !dest) {
+    setJob(id, null);
+    return;
+  }
+  if (setup.isInside(have.location, settings.installDir)) {
+    setJob(id, { phase: 'done', result: 'moved' });
+    return;
+  }
+  if (!(await askClose(appDef, have))) {
+    setJob(id, { phase: 'canceled' });
+    return;
+  }
+  if (have.managed) {
+    setJob(id, { phase: 'move' });
+    fs.mkdirSync(dest, { recursive: true });
+    const exe = path.join(dest, path.basename(have.exe));
+    fs.copyFileSync(have.exe, exe);
+    fs.rmSync(have.exe, { force: true });
+    try {
+      fs.rmdirSync(path.dirname(have.exe));
+    } catch {
+      // Ordner nicht leer: dann bleibt er
+    }
+    if (have.shortcut) fs.rmSync(have.shortcut, { force: true });
+    const shortcut = /\.exe$/i.test(exe) ? setup.startMenuShortcut(app.getPath('appData'), appDef.name, exe) : '';
+    inst.setManaged(id, { version: have.version, path: exe, shortcut });
+  } else {
+    const kind = appDef.win && appDef.win.kind;
+    if (kind !== 'inno' && kind !== 'nsis') {
+      setJob(id, null);
+      return;
+    }
+    // zuerst laden und prüfen: schlägt das fehl, ist noch nichts deinstalliert
+    const pkg = await fetchPackage(id);
+    if (!pkg) return;
+    if (!isWindowsProgram(pkg.file)) {
+      fs.rmSync(pkg.file, { force: true });
+      throw new HubError('installer', 'no exe');
+    }
+    setJob(id, { phase: 'move' });
+    const oldLoc = have.location;
+    let code = await setup.uninstall(kind, have.uninstall);
+    if (code !== 0) throw new HubError('uninstall', String(code));
+    code = await setup.runInstaller(pkg.file, setup.installArgs(kind, have, settings.allUsers, dest));
+    if (!settings.keepInstallers) fs.rmSync(pkg.file, { force: true });
+    if (code !== 0) throw new HubError('installer', String(code));
+    const dataDir = appDef.win && appDef.win.dataDir;
+    if (dataDir && oldLoc) {
+      const from = path.join(oldLoc, dataDir);
+      const to = path.join(dest, dataDir);
+      if (fs.existsSync(from) && !fs.existsSync(to)) fs.cpSync(from, to, { recursive: true });
+    }
+  }
+  await rescan();
+  const now = state.installed[id];
+  if (!now || !setup.isInside(now.location, settings.installDir)) throw new HubError('move');
+  setJob(id, { phase: 'done', result: 'moved', version: now.version });
+}
+
+// ---------------------------------------------------------------- Web-Apps im eigenen Fenster (wie mit Webline geöffnet)
+const webWins = new Map();
+/** Selbsttest: Seiten vom Testserver statt von mert.win */
+const siteUrl = (u) => (process.env.WHUB_SITE ? String(u).replace('https://mert.win', process.env.WHUB_SITE) : u);
+
+function openWebApp(id, url) {
+  const appDef = byId[id];
+  const target = appDef && siteUrl(url || appDef.web);
+  if (!target) return false;
+  const key = `${id}|${target}`;
+  const open = webWins.get(key);
+  if (open && !open.isDestroyed()) {
+    if (open.isMinimized()) open.restore();
+    open.show();
+    open.focus();
+    return true;
+  }
+  const saved = (settings.webWindows || {})[id] || {};
+  const dark = settings.mode === 'dark' || (settings.mode !== 'light' && nativeTheme.shouldUseDarkColors);
+  const icon = path.join(__dirname, '..', 'assets', 'icons', `${id}.png`);
+  const partition = `persist:web-${id}`;
+  const w = new BrowserWindow({
+    width: saved.width || 1200,
+    height: saved.height || 800,
+    x: saved.x,
+    y: saved.y,
+    minWidth: 360,
+    minHeight: 300,
+    show: false,
+    title: appDef.name,
+    icon: fs.existsSync(icon) ? icon : undefined,
+    backgroundColor: dark ? '#14161b' : '#ffffff',
+    autoHideMenuBar: true,
+    webPreferences: { partition, contextIsolation: true, sandbox: true, spellcheck: true, backgroundThrottling: !selfTest },
+  });
+  w.setMenuBarVisibility(false);
+  if (saved.maximized) w.maximize();
+  // eigenes Symbol in der Taskleiste statt unter W Hub gruppiert
+  if (process.platform === 'win32') w.setAppDetails({ appId: `${APP_ID}.${id}`, relaunchDisplayName: appDef.name });
+  const origin = new URL(target).origin;
+  const inside = (u) => {
+    try {
+      const x = new URL(u);
+      return x.origin === origin || /(^|\.)mert\.win$/i.test(x.hostname);
+    } catch {
+      return false;
+    }
+  };
+  const external = (u) => {
+    if (/^https?:\/\//i.test(u) && !selfTest) shell.openExternal(u);
+  };
+  w.webContents.setWindowOpenHandler(({ url: u }) => {
+    if (inside(u)) return { action: 'allow', overrideBrowserWindowOptions: { autoHideMenuBar: true, icon: fs.existsSync(icon) ? icon : undefined, webPreferences: { partition } } };
+    external(u);
+    return { action: 'deny' };
+  });
+  w.webContents.on('will-navigate', (e, u) => {
+    if (!inside(u)) {
+      e.preventDefault();
+      external(u);
+    }
+  });
+  // Titel: Name der App, Seitentitel dahinter (wie Webline)
+  w.on('page-title-updated', (e, title) => {
+    e.preventDefault();
+    w.setTitle(title && title !== appDef.name ? `${appDef.name} – ${title}` : appDef.name);
+  });
+  const remember = () => {
+    if (w.isDestroyed() || w.isMinimized()) return;
+    const maximized = w.isMaximized();
+    const b = maximized ? saved : w.getBounds();
+    settings.webWindows = { ...(settings.webWindows || {}), [id]: { x: b.x, y: b.y, width: b.width, height: b.height, maximized } };
+  };
+  for (const ev of ['resize', 'move', 'maximize', 'unmaximize']) w.on(ev, remember);
+  w.once('ready-to-show', () => {
+    if (!selfTest) w.show();
+  });
+  w.on('closed', () => webWins.delete(key));
+  webWins.set(key, w);
+  w.loadURL(target);
+  return true;
 }
 
 // ---------------------------------------------------------------- Fenster
@@ -340,7 +522,7 @@ function buildMenu() {
 // ---------------------------------------------------------------- IPC
 ipcMain.handle('settings:get', () => settings);
 ipcMain.handle('settings:set', (_e, next) => {
-  settings = { ...next, window: settings.window };
+  settings = { ...next, window: settings.window, webWindows: settings.webWindows };
   writeJson(userFile('settings.json'), settings);
   return true;
 });
@@ -380,6 +562,13 @@ ipcMain.handle('hub:open', (_e, id) => {
   if (selfTest) return fs.existsSync(have.exe);
   return setup.launch(have.exe);
 });
+ipcMain.handle('hub:move', (_e, ids) => (Array.isArray(ids) ? ids.filter((id) => byId[id] && state.installed[id]).map((id) => enqueue(id, 'move')) : []));
+ipcMain.handle('hub:pick-dir', async (_e, current) => {
+  if (selfTest) return process.env.WHUB_PICK_DIR || null;
+  const r = await dialog.showOpenDialog(win, { title: t('installDir'), defaultPath: current || process.env.LOCALAPPDATA || app.getPath('home'), properties: ['openDirectory', 'createDirectory', 'promptToCreate'] });
+  return r.canceled || !r.filePaths.length ? null : r.filePaths[0];
+});
+ipcMain.handle('hub:web', (_e, id, url) => openWebApp(id, url));
 ipcMain.handle('hub:reveal', (_e, id) => {
   const have = state.installed[id];
   if (have && have.exe && fs.existsSync(have.exe)) shell.showItemInFolder(have.exe);
@@ -479,7 +668,7 @@ if (!selfTest && !app.requestSingleInstanceLock()) {
     setupAutoUpdate();
     // regelmäßig nachsehen, solange W Hub offen ist
     if (!selfTest) setInterval(() => refresh(false), 6 * 60 * 60 * 1000);
-    if (selfTest) require(path.join(__dirname, '..', 'tools', testArg === '--siteshots' ? 'siteshots.js' : 'selftest.js'))(win, selfTest, { state, queue });
+    if (selfTest) require(path.join(__dirname, '..', 'tools', testArg === '--siteshots' ? 'siteshots.js' : 'selftest.js'))(win, selfTest, { state, queue, webWins });
   });
 }
 

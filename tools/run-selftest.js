@@ -24,8 +24,11 @@ class P { static int Main(string[] a) {
   string d = Environment.GetEnvironmentVariable("WHUB_FAKE_DIR");
   string me = Path.GetFileName(Environment.GetCommandLineArgs()[0]);
   File.AppendAllText(Path.Combine(d, "log.txt"), me + "|" + string.Join(" ", a) + "\\n");
+  string[] queue = Directory.GetFiles(d, "next-registry-*.json");
+  Array.Sort(queue, StringComparer.Ordinal);
   string next = Path.Combine(d, "next-registry.json");
-  if (File.Exists(next)) File.Copy(next, Path.Combine(d, "registry.json"), true);
+  if (queue.Length > 0) { File.Copy(queue[0], Path.Combine(d, "registry.json"), true); File.Delete(queue[0]); }
+  else if (File.Exists(next)) File.Copy(next, Path.Combine(d, "registry.json"), true);
   string code = Path.Combine(d, "exitcode.txt");
   return File.Exists(code) ? int.Parse(File.ReadAllText(code).Trim()) : 0;
 } }`;
@@ -56,6 +59,8 @@ function freePort() {
     WHUB_REGISTRY: path.join(dir, 'registry.json'),
     WHUB_FAKE_DIR: dir,
     WHUB_NO_SHORTCUTS: '1',
+    WHUB_SITE: `http://127.0.0.1:${port}`,
+    WHUB_PICK_DIR: path.join(dir, 'W Software'),
   };
   delete env.ELECTRON_RUN_AS_NODE;
   const child = spawn(electron, [...(exe ? [] : [root]), shots ? '--siteshots' : '--selftest', dir], { env, stdio: 'inherit', windowsHide: true });
