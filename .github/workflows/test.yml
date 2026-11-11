@@ -1,0 +1,30 @@
+name: Selbsttest
+
+# Selbsttest bei jedem Push auf main: Windows mit Test-Installer (Oberfläche, Installieren, Updates,
+# Verschieben, Auto-Update), dazu auf allen drei Systemen der Hintergrundbetrieb (Start mit dem System
+# ohne Fenster, Symbol im Infobereich, parallele Downloads).
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  selftest:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm ci
+      - if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y xvfb
+      - run: npm run bundle
+      - run: node tools/run-selftest.js selftest-out

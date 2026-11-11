@@ -38,6 +38,8 @@ function withDefaults(s) {
   out.notify ??= true;
   out.allUsers ??= false;
   out.keepInstallers ??= false;
+  out.autoUpdate ??= false;
+  out.startWithSystem ??= false;
   out.installDir ??= '';
   out.folders = Array.isArray(out.folders) ? out.folders : [];
   out.homeOrder = Array.isArray(out.homeOrder) ? out.homeOrder : [];
@@ -795,7 +797,9 @@ function openSettings() {
     h('div', { class: 'sep' }),
     installDirOption(),
     tog('checkOnStart', t('checkOnStart')),
+    tog('autoUpdate', t('autoUpdate'), t('autoUpdateHint')),
     tog('notify', t('notifyUpdates')),
+    info.startWithSystem ? tog('startWithSystem', t('startWithSystem'), t('startWithSystemHint')) : null,
     info.platform === 'win32' ? tog('allUsers', t('allUsers'), t('allUsersHint')) : null,
     tog('keepInstallers', t('keepInstallers')),
     h('div', { class: 'sep' }),
@@ -868,6 +872,9 @@ async function boot() {
     else render();
   });
   api.onShow((v) => go(v));
+  // aus dem Infobereich oder per Systemmeldung geöffnet: gleich auf die passende Seite
+  const first = await api.takeView();
+  if (first) go(first);
   if (settings.checkOnStart || !hub.checked) await refresh(false);
   window.__ready = true;
 }

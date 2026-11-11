@@ -30,6 +30,7 @@ contextBridge.exposeInMainWorld('api', {
   onState: (cb) => on('hub:state', cb),
   onJob: (cb) => on('hub:job', cb),
   onShow: (cb) => on('hub:show', cb),
+  takeView: () => invoke('hub:take-view'),
 
   openExternal: (url) => invoke('shell:open-external', url),
 });

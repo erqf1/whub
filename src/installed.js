@@ -150,6 +150,14 @@ async function scan() {
 
 /** Läuft das Programm gerade? (nur Windows; sonst false) */
 async function running(exe) {
+  // Selbsttest: laufende Programme stehen in einer Datei (je Zeile ein EXE-Name)
+  if (process.env.WHUB_RUNNING) {
+    try {
+      return !!exe && fs.readFileSync(process.env.WHUB_RUNNING, 'utf8').split(/\r?\n/).includes(path.basename(exe));
+    } catch {
+      return false;
+    }
+  }
   if (process.platform !== 'win32' || !exe || process.env.WHUB_REGISTRY) return false;
   const out = await run('tasklist.exe', ['/FI', `IMAGENAME eq ${path.basename(exe)}`, '/FO', 'CSV', '/NH']);
   return !!out && out.toLowerCase().includes(`"${path.basename(exe).toLowerCase()}"`);

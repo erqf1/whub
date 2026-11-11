@@ -1,8 +1,8 @@
 'use strict';
 
 // W Hub - Hauptprozess: Fenster, Einstellungen, Katalog-Stand (GitHub + installierte Programme),
-// Warteschlange für Installationen und Updates, Selbst-Update.
-const { app, BrowserWindow, ipcMain, dialog, shell, Menu, nativeTheme, Notification } = require('electron');
+// Warteschlange für Installationen und Updates, Selbst-Update, Hintergrundbetrieb mit Symbol im Infobereich.
+const { app, BrowserWindow, ipcMain, dialog, shell, Menu, nativeTheme, Notification, Tray, nativeImage } = require('electron');
 const fs = require('fs');
 const path = require('path');
 const { execFileSync } = require('child_process');
@@ -14,9 +14,20 @@ const { t: tr } = require('./shared/i18n');
 
 const APP_ID = 'win.mert.WHub';
 const REPO = 'erqf1/whub';
-// --selftest <ordner>: Selbsttest; --siteshots <ordner>: Bilder für die Website (beides unsichtbar)
-const testArg = ['--selftest', '--siteshots'].find((a) => process.argv.includes(a));
+// --selftest <ordner>: Selbsttest; --siteshots <ordner>: Bilder für die Website (beides unsichtbar);
+// --selftest-bg <ordner>: Selbsttest des Hintergrundbetriebs (Start mit dem System, ohne Fenster)
+const testArg = ['--selftest-bg', '--selftest', '--siteshots'].find((a) => process.argv.includes(a));
 const selfTest = testArg ? process.argv[process.argv.indexOf(testArg) + 1] : null;
+// Mit dem System gestartet: kein Fenster, nur das Symbol im Infobereich (macOS meldet das selbst)
+let background = process.argv.includes('--autostart') || testArg === '--selftest-bg';
+const HOUR = 60 * 60 * 1000;
+const CHECK_EVERY = 6 * HOUR;
+const RETRY_RUNNING = 30 * 60 * 1000; // laufende Programme: in 30 Minuten noch einmal versuchen
+const RETRY_OFFLINE = 10 * 60 * 1000; // beim Systemstart oft noch kein Netz
+// Ohne Fenster braucht es keine Grafikkarte: spart im Infobereich rund 80 MB (GPU-Prozess).
+// Wird das Fenster geöffnet, startet W Hub dafür einmal neu (siehe openWindow).
+const gpuOff = background;
+if (gpuOff) app.disableHardwareAcceleration();
 
 if (process.platform === 'win32') app.setAppUserModelId(APP_ID);
 if (selfTest) {
@@ -29,6 +40,7 @@ if (selfTest) {
 }
 
 let win = null;
+let tray = null;
 let settings = {};
 const userFile = (name) => path.join(app.getPath('userData'), name);
 const t = (key, vars) => tr(settings.language || 'en', key, vars);
@@ -75,7 +87,10 @@ function snapshot() {
 }
 
 let refreshing = null;
-async function refresh(force = false) {
+let firstCheck = true;
+/** Releases und installierte Programme neu lesen. auto = Prüfung beim Start oder im Hintergrund:
+ *  dann werden Updates (falls eingestellt) gleich still eingereiht. */
+async function refresh(force = false, auto = false) {
   if (refreshing) return refreshing;
   refreshing = (async () => {
     const withRepo = APPS.filter((a) => a.repo);
@@ -92,7 +107,10 @@ async function refresh(force = false) {
     state.error = errors.has('limit') ? 'limit' : errors.size ? 'offline' : null;
     state.checked = Date.now();
     send('hub:state', snapshot());
-    notifyUpdates();
+    const first = firstCheck;
+    firstCheck = false;
+    const queued = auto || first ? await autoUpdate() : new Set();
+    notifyUpdates(queued);
     return snapshot();
   })();
   try {
@@ -116,27 +134,76 @@ function updatesAvailable() {
   return out;
 }
 
-/** Einmal je neuer Version eine Systemmeldung */
-function notifyUpdates() {
-  if (selfTest || settings.notify === false || !Notification.isSupported()) return;
-  const list = updatesAvailable();
+/** Systemmeldung; im Selbsttest nur mitschreiben. Klick öffnet W Hub (bei view auf dieser Seite). */
+const notes = [];
+function notify(title, body, view, always = false) {
+  if (settings.notify === false && !always) return;
+  if (selfTest) {
+    notes.push({ title, body, view });
+    return;
+  }
+  if (!Notification.isSupported()) return;
+  const n = new Notification({ title, body, icon: path.join(__dirname, '..', 'assets', 'icon.png') });
+  n.on('click', () => openWindow(view));
+  n.show();
+}
+
+/** Einmal je neuer Version eine Systemmeldung. skip = gerade still eingereihte Updates (die melden sich selbst).
+ *  again = auch schon gemeldete Versionen nennen (Prüfen über das Symbol im Infobereich). */
+function notifyUpdates(skip = new Set(), again = false) {
+  const list = updatesAvailable().filter((u) => !skip.has(u.id));
   const seen = readJson(userFile('notified.json'), {});
-  const fresh = list.filter((u) => seen[u.id] !== u.version);
-  if (!fresh.length) return;
+  const fresh = again ? list : list.filter((u) => seen[u.id] !== u.version);
+  if (!fresh.length) return false;
   for (const u of fresh) seen[u.id] = u.version;
   writeJson(userFile('notified.json'), seen);
-  const n = new Notification({
-    title: t('notifyTitle'),
-    body: fresh.length === 1 ? t('notifyOne', { app: fresh[0].name, version: fresh[0].version }) : t('notifyMany', { n: fresh.length, list: fresh.map((u) => u.name).join(', ') }),
-  });
-  n.on('click', () => {
-    if (!win) return;
-    if (win.isMinimized()) win.restore();
-    win.show();
-    win.focus();
-    send('hub:show', 'updates');
-  });
-  n.show();
+  notify(t('notifyTitle'), fresh.length === 1 ? t('notifyOne', { app: fresh[0].name, version: fresh[0].version }) : t('notifyMany', { n: fresh.length, list: fresh.map((u) => u.name).join(', ') }), 'updates', again);
+  return true;
+}
+
+// ---------------------------------------------------------------- Alles automatisch aktualisieren
+/** Kann W Hub dieses Update ohne Rückfrage einspielen? (stiller Installer oder einzelne Datei) */
+function silentUpdate(id) {
+  const appDef = byId[id];
+  const rel = (state.releases[id] || []).find((r) => !r.prerelease);
+  const asset = rel && pickAsset(appDef, rel.assets, SYS);
+  if (!asset) return false;
+  const kind = appDef.win && appDef.win.kind;
+  if (SYS.platform === 'win32' && (kind === 'inno' || kind === 'nsis')) return true;
+  return (kind === 'portable' && SYS.platform === 'win32') || /\.html$/i.test(asset.name);
+}
+
+let autoRetry = null;
+const autoDone = [];
+/** Alle Updates still einreihen. Laufende Programme werden nicht geschlossen, sondern später noch einmal versucht.
+ *  Liefert die eingereihten Programme. */
+async function autoUpdate() {
+  const queued = new Set();
+  if (!settings.autoUpdate) return queued;
+  clearTimeout(autoRetry);
+  autoRetry = null;
+  let skipped = 0;
+  for (const u of updatesAvailable()) {
+    if (!silentUpdate(u.id)) continue;
+    const job = state.jobs[u.id];
+    if (job && !['done', 'error', 'canceled'].includes(job.phase)) {
+      queued.add(u.id);
+      continue;
+    }
+    if (await inst.running(state.installed[u.id].exe)) {
+      skipped++;
+      continue;
+    }
+    if (enqueue(u.id, 'update', true)) queued.add(u.id);
+  }
+  if (skipped) autoRetry = setTimeout(() => refresh(false, true), Number(process.env.WHUB_RETRY_MS) || RETRY_RUNNING);
+  return queued;
+}
+/** Nach dem letzten still eingespielten Update einmal Bescheid geben */
+function autoFinished() {
+  if (busy || queue.length || !autoDone.length) return;
+  const list = autoDone.splice(0);
+  notify(t('autoUpdatedTitle'), list.length === 1 ? t('autoUpdatedOne', { app: list[0].name, version: list[0].version }) : t('autoUpdatedMany', { n: list.length, list: list.map((u) => u.name).join(', ') }), 'home');
 }
 
 // ---------------------------------------------------------------- Warteschlange
@@ -144,16 +211,18 @@ const queue = [];
 let busy = false;
 const controllers = {};
 
+const stats = { jobMsgs: 0 };
 function setJob(id, patch) {
   state.jobs[id] = patch ? { ...(state.jobs[id] || {}), ...patch } : undefined;
   if (!patch) delete state.jobs[id];
+  stats.jobMsgs++;
   send('hub:job', { id, job: state.jobs[id] || null });
 }
 
-function enqueue(id, action) {
+function enqueue(id, action, auto = false) {
   if (state.jobs[id] && !['done', 'error', 'canceled'].includes(state.jobs[id].phase)) return false;
-  queue.push({ id, action });
-  setJob(id, { phase: 'queued', action, got: 0, total: 0, error: null });
+  queue.push({ id, action, auto });
+  setJob(id, { phase: 'queued', action, auto, got: 0, total: 0, error: null });
   pump();
   return true;
 }
@@ -166,13 +235,18 @@ async function pump() {
   try {
     if (next.action === 'uninstall') await doUninstall(next.id);
     else if (next.action === 'move') await doMove(next.id);
-    else await doInstall(next.id);
+    else await doInstall(next.id, next.auto);
   } catch (e) {
     if (state.jobs[next.id] && state.jobs[next.id].phase !== 'canceled') setJob(next.id, { phase: 'error', error: e.code || 'failed', detail: String(e.message || e).slice(0, 200) });
   } finally {
     delete controllers[next.id];
     busy = false;
+    const job = state.jobs[next.id];
+    if (next.auto && job && job.phase === 'done') autoDone.push({ id: next.id, name: byId[next.id].name, version: job.version });
+    // im Hintergrund sieht niemand den Job: fertige und abgebrochene gleich wegräumen
+    if (next.auto && !win && job && job.phase !== 'error') setJob(next.id, null);
     pump();
+    autoFinished();
   }
 }
 
@@ -244,14 +318,21 @@ async function fetchPackage(id) {
   return { file, asset, version: rel.tag.replace(/^v/, '') };
 }
 
-async function doInstall(id) {
+async function doInstall(id, auto = false) {
   const appDef = byId[id];
   const list = state.releases[id] || [];
   const rel = list.find((r) => !r.prerelease) || list[0];
   if (!rel) throw new HubError('norelease');
   if (!pickAsset(appDef, rel.assets, SYS)) throw new HubError('noasset');
   const existing = state.installed[id];
-  if (!(await askClose(appDef, existing))) {
+  // still: ein inzwischen gestartetes Programm nicht schließen, sondern später noch einmal versuchen
+  if (auto && existing && (await inst.running(existing.exe))) {
+    setJob(id, null);
+    clearTimeout(autoRetry);
+    autoRetry = setTimeout(() => refresh(false, true), Number(process.env.WHUB_RETRY_MS) || RETRY_RUNNING);
+    return;
+  }
+  if (!auto && !(await askClose(appDef, existing))) {
     setJob(id, { phase: 'canceled' });
     return;
   }
@@ -508,7 +589,115 @@ function createWindow() {
   for (const ev of ['resize', 'move', 'maximize', 'unmaximize']) win.on(ev, remember);
   win.on('closed', () => {
     win = null;
+    // nur noch im Infobereich: Dock-Symbol weg, erledigte Jobs braucht keiner mehr
+    if (tray && process.platform === 'darwin' && app.dock) app.dock.hide();
+    for (const [id, job] of Object.entries(state.jobs)) if (['done', 'canceled'].includes(job.phase)) delete state.jobs[id];
   });
+}
+
+/** Fenster zeigen (im Hintergrundbetrieb erst jetzt anlegen), view = Seite, die aufgehen soll */
+let pendingView = (process.argv.find((a) => a.startsWith('--view=')) || '').slice(7) || null;
+function openWindow(view) {
+  // ohne Grafikkarte gestartet: für das Fenster sauber neu starten, außer es läuft gerade eine Installation
+  if (!win && gpuOff && !selfTest && !busy && !queue.length) {
+    app.relaunch({ args: [...process.argv.slice(1).filter((a) => a !== '--autostart' && !a.startsWith('--view=')), ...(view ? [`--view=${view}`] : [])] });
+    app.exit(0);
+    return null;
+  }
+  background = false;
+  if (process.platform === 'darwin' && app.dock) app.dock.show();
+  if (!win) {
+    pendingView = view || null;
+    createWindow();
+    return win;
+  }
+  if (win.isMinimized()) win.restore();
+  win.show();
+  win.focus();
+  if (view) send('hub:show', view);
+  return win;
+}
+
+// ---------------------------------------------------------------- Mit dem System starten
+/** Zeile für Exec= in einer .desktop-Datei (Freedesktop: Argumente mit Leerzeichen in "", \ " ` $ maskiert) */
+function desktopExec(args) {
+  return args.map((a) => (/[\s"`$\\]/.test(a) ? `"${a.replace(/(["`$\\])/g, '\\$1')}"` : a)).join(' ');
+}
+const autostartFile = () => path.join(process.env.WHUB_AUTOSTART_DIR || path.join(process.env.XDG_CONFIG_HOME || path.join(app.getPath('home'), '.config'), 'autostart'), `${APP_ID}.desktop`);
+let loginItem = null; // Selbsttest: was eingetragen worden wäre
+function applyAutostart(on) {
+  try {
+    if (process.platform === 'linux') {
+      if (selfTest && !process.env.WHUB_AUTOSTART_DIR) return void (loginItem = { openAtLogin: on, args: ['--autostart'] });
+      const file = autostartFile();
+      if (!on) {
+        loginItem = { openAtLogin: false, file };
+        return fs.rmSync(file, { force: true });
+      }
+      // .deb/.pacman: /opt/W Hub/whub, .tar.gz: wo es eben liegt; in der Entwicklung electron + Projektordner
+      const exe = process.env.APPIMAGE || process.execPath;
+      const args = [exe, ...(app.isPackaged ? [] : [app.getAppPath()]), '--autostart'];
+      fs.mkdirSync(path.dirname(file), { recursive: true });
+      fs.writeFileSync(file, ['[Desktop Entry]', 'Type=Application', 'Name=W Hub', `Comment=${t('trayTip')}`, `Exec=${desktopExec(args)}`, 'Icon=whub', 'Terminal=false', 'NoDisplay=false', 'X-GNOME-Autostart-enabled=true', ''].join('\n'));
+      loginItem = { openAtLogin: on, args: args.slice(1), file };
+      return;
+    }
+    const opts = { openAtLogin: on, args: ['--autostart'] };
+    // portable EXE: nicht die entpackte Kopie im Temp-Ordner eintragen
+    if (process.env.PORTABLE_EXECUTABLE_FILE) opts.path = process.env.PORTABLE_EXECUTABLE_FILE;
+    loginItem = opts;
+    if (selfTest || !app.isPackaged) return;
+    app.setLoginItemSettings(opts);
+  } catch (e) {
+    console.error('Autostart:', e.message);
+  }
+}
+
+// ---------------------------------------------------------------- Symbol im Infobereich
+function trayIcon() {
+  const px = process.platform === 'darwin' ? 18 : process.platform === 'win32' ? 16 : 24;
+  const src = nativeImage.createFromPath(path.join(__dirname, '..', 'assets', 'icon.png'));
+  const img = nativeImage.createEmpty();
+  for (const scale of [1, 2]) img.addRepresentation({ scaleFactor: scale, width: px * scale, height: px * scale, buffer: src.resize({ width: px * scale, height: px * scale, quality: 'best' }).toPNG() });
+  return img;
+}
+let trayChecking = false;
+async function trayCheck() {
+  if (trayChecking) return;
+  trayChecking = true;
+  updateTray();
+  try {
+    await refresh(true, true);
+    // von Hand geprüft: Ergebnis immer melden, auch wenn schon bekannt
+    const queued = new Set(Object.keys(state.jobs).filter((id) => state.jobs[id].auto));
+    if (!notifyUpdates(queued, true) && !queued.size) notify('W Hub', state.error ? t(state.error === 'limit' ? 'errLimit' : 'errOffline') : t('allUpToDate'), null, true);
+  } finally {
+    trayChecking = false;
+    updateTray();
+  }
+}
+function updateTray() {
+  if (!tray) return;
+  const n = updatesAvailable().length;
+  tray.setToolTip(n ? `W Hub – ${t('notifyTitle')} (${n})` : 'W Hub');
+  tray.setContextMenu(Menu.buildFromTemplate([
+    { label: t('trayOpen'), click: () => openWindow() },
+    { label: trayChecking ? t('trayChecking') : t('checkNow'), enabled: !trayChecking, click: trayCheck },
+    { type: 'separator' },
+    { label: t('trayQuit'), click: () => app.quit() },
+  ]));
+}
+/** Symbol gibt es, solange "Mit dem System starten" an ist (oder W Hub so gestartet wurde) */
+function ensureTray() {
+  const want = !!settings.startWithSystem || (background && !win);
+  if (want && !tray) {
+    tray = new Tray(trayIcon());
+    if (process.platform !== 'darwin') tray.on('click', () => openWindow());
+    updateTray();
+  } else if (!want && tray) {
+    tray.destroy();
+    tray = null;
+  }
 }
 
 function buildMenu() {
@@ -522,15 +711,26 @@ function buildMenu() {
 // ---------------------------------------------------------------- IPC
 ipcMain.handle('settings:get', () => settings);
 ipcMain.handle('settings:set', (_e, next) => {
+  const prev = settings;
   settings = { ...next, window: settings.window, webWindows: settings.webWindows };
   writeJson(userFile('settings.json'), settings);
+  if (!!prev.startWithSystem !== !!settings.startWithSystem) applyAutostart(!!settings.startWithSystem);
+  ensureTray();
+  if (prev.language !== settings.language) updateTray();
   return true;
+});
+ipcMain.handle('hub:take-view', () => {
+  const v = pendingView;
+  pendingView = null;
+  return v;
 });
 ipcMain.handle('app:info', () => ({
   version: app.getVersion(),
   platform: process.platform,
   dark: nativeTheme.shouldUseDarkColors,
   selfTest: !!selfTest,
+  // Hintergrundbetrieb mit Symbol im Infobereich: Windows, macOS und Linux
+  startWithSystem: true,
   sys: SYS,
 }));
 nativeTheme.on('updated', () => send('app:system-theme', nativeTheme.shouldUseDarkColors));
@@ -604,7 +804,8 @@ function setupAutoUpdate() {
   let asking = false;
   autoUpdater.on('update-downloaded', async (info) => {
     const later = readJson(laterFile, {});
-    if (asking || busy || (later.version === info.version && Date.now() < later.until)) return;
+    // ohne Fenster nicht stören: das Update kommt beim Beenden ohnehin dazu
+    if (!win || asking || busy || (later.version === info.version && Date.now() < later.until)) return;
     asking = true;
     const { response } = await dialog.showMessageBox(win, {
       type: 'info',
@@ -620,13 +821,13 @@ function setupAutoUpdate() {
     else writeJson(laterFile, { version: info.version, until: Date.now() + 14 * 24 * 3600 * 1000 });
   });
   setTimeout(check, 5000);
-  setInterval(check, 60 * 60 * 1000);
+  setInterval(check, HOUR);
 }
 function setupUpdateNotice() {
   const laterFile = userFile('update.json');
   let asked = false;
   const check = async () => {
-    if (asked) return;
+    if (asked || !win) return;
     const { list } = await gh.releases(REPO);
     const rel = gh.latest(list);
     const version = rel ? rel.tag.replace(/^v/, '') : '';
@@ -647,28 +848,52 @@ function setupUpdateNotice() {
     else writeJson(laterFile, { version, until: Date.now() + 14 * 24 * 3600 * 1000 });
   };
   setTimeout(check, 8000);
-  setInterval(check, 6 * 60 * 60 * 1000);
+  setInterval(check, CHECK_EVERY);
 }
 
 // ---------------------------------------------------------------- Start
 if (!selfTest && !app.requestSingleInstanceLock()) {
   app.quit();
 } else {
-  app.on('second-instance', () => {
-    if (!win) return;
-    if (win.isMinimized()) win.restore();
-    win.focus();
+  // noch einmal gestartet (Startmenü, Verknüpfung): Fenster zeigen, auch aus dem Infobereich heraus
+  app.on('second-instance', (_e, argv) => {
+    if (!argv.includes('--autostart')) openWindow();
   });
   app.whenReady().then(() => {
     settings = readJson(userFile('settings.json'), {});
     gh.init(path.join(app.getPath('userData'), 'cache'));
     inst.init(app.getPath('userData'));
+    if (process.platform === 'darwin' && !selfTest) {
+      try {
+        if (app.getLoginItemSettings().wasOpenedAtLogin) background = true;
+      } catch {
+        // ältere macOS-Versionen
+      }
+    }
+    // ohne die Option ist ein Hintergrundstart ein Überbleibsel: normal öffnen
+    if (background && !settings.startWithSystem && !selfTest) background = false;
     buildMenu();
-    createWindow();
+    if (background) {
+      // nur der Hauptprozess: kein Fenster, keine Oberfläche, bis jemand auf "Öffnen" klickt
+      if (process.platform === 'darwin' && app.dock) app.dock.hide();
+      ensureTray();
+      const first = async () => {
+        await refresh(false, true);
+        updateTray();
+        if (state.error === 'offline') setTimeout(first, Number(process.env.WHUB_RETRY_MS) || RETRY_OFFLINE);
+      };
+      setTimeout(first, selfTest ? 200 : 15000);
+    } else {
+      createWindow();
+      ensureTray();
+    }
+    // Pfad im Autostart aktuell halten (z. B. nach einem Update an anderer Stelle)
+    if (settings.startWithSystem) applyAutostart(true);
     setupAutoUpdate();
-    // regelmäßig nachsehen, solange W Hub offen ist
-    if (!selfTest) setInterval(() => refresh(false), 6 * 60 * 60 * 1000);
-    if (selfTest) require(path.join(__dirname, '..', 'tools', testArg === '--siteshots' ? 'siteshots.js' : 'selftest.js'))(win, selfTest, { state, queue, webWins });
+    // regelmäßig nachsehen, solange W Hub läuft (auch nur im Infobereich)
+    if (!selfTest) setInterval(() => refresh(false, true).then(updateTray, () => {}), CHECK_EVERY);
+    const hubApi = { state, queue, webWins, stats, notes, refresh, autoUpdate, openWindow, trayCheck, tray: () => tray, win: () => win, loginItem: () => loginItem, autostartFile, setup };
+    if (selfTest) require(path.join(__dirname, '..', 'tools', { '--siteshots': 'siteshots.js', '--selftest-bg': 'selftest-bg.js' }[testArg] || 'selftest.js'))(win, selfTest, hubApi);
   });
 }
 
@@ -680,7 +905,10 @@ app.on('before-quit', () => {
     // egal
   }
 });
-app.on('window-all-closed', () => app.quit());
+// mit Symbol im Infobereich schließt das X nur das Fenster, W Hub läuft weiter
+app.on('window-all-closed', () => {
+  if (!tray) app.quit();
+});
 app.on('activate', () => {
-  if (!win) createWindow();
+  if (!win) openWindow();
 });

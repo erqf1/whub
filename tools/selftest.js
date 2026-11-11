@@ -72,7 +72,8 @@ module.exports = async function selftest(win, dir, hub) {
   };
   const tiny = (s) => Buffer.from(s);
   // großes, aber echtes Programm (angehängte Daten stören Windows nicht)
-  const big = Buffer.concat([fakeBytes, Buffer.alloc(3 * 1024 * 1024, 7)]);
+  // über 8 MB: kommt über mehrere Verbindungen (Range)
+  const big = Buffer.concat([fakeBytes, Buffer.alloc(10 * 1024 * 1024, 7)]);
   const NOTES = '## Neu\n\n- **Plugins**: das Musik-Plugin mit Bibliothek\n- Fix: `MP3` mit Cover spielt wieder\n  - auch mit langen Titeln\n\nMehr im [Changelog](https://mert.win/vid/changelog.html).\n\n<!-- intern -->';
   const rel = (tag, assets, body = `Version ${tag}`, date = '2026-11-03T12:00:00Z') => ({ tag_name: tag, name: tag, published_at: date, body, html_url: `https://github.com/x/releases/tag/${tag}`, prerelease: false, draft: false, assets });
   const RELEASES = {
@@ -85,7 +86,7 @@ module.exports = async function selftest(win, dir, hub) {
     'erqf1/GambelStrike2': [rel('v1.1.0', [addFile('GambelStrike2-v1.1.0-Windows.exe', fakeBytes), addFile('GambelStrike2-v1.1.0-offline.html', tiny('<html></html>'))])],
     'erqf1/JumpNDodge': [rel('installer', [addFile('JumpNDodge-Windows_Installer.exe', big)])],
   };
-  const mode = { limit: false, slow: new Set(['JumpNDodge-Windows_Installer.exe']), apiCalls: 0, notModified: 0, pages: [] };
+  const mode = { limit: false, slow: new Set(['JumpNDodge-Windows_Installer.exe']), apiCalls: 0, notModified: 0, pages: [], rev: 0, ranges: {} };
   const server = http.createServer((req, res) => {
     const u = new URL(req.url, base);
     const m = /^\/repos\/([^/]+\/[^/]+)\/releases$/.exec(u.pathname);
@@ -100,7 +101,7 @@ module.exports = async function selftest(win, dir, hub) {
         res.writeHead(404);
         return res.end('{}');
       }
-      const etag = `"t-${m[1]}"`;
+      const etag = `"t-${m[1]}-${mode.rev}"`;
       if (req.headers['if-none-match'] === etag) {
         mode.notModified++;
         res.writeHead(304, { ETag: etag });
@@ -112,10 +113,16 @@ module.exports = async function selftest(win, dir, hub) {
     const d = /^\/dl\/(.+)$/.exec(u.pathname);
     if (d && files[decodeURIComponent(d[1])]) {
       const name = decodeURIComponent(d[1]);
-      const bytes = files[name];
-      res.writeHead(200, { 'Content-Type': 'application/octet-stream', 'Content-Length': bytes.length });
+      const all = files[name];
+      // wie GitHub: Range-Anfragen bekommen 206 mit dem Stück
+      const r = /^bytes=(\d+)-(\d+)$/.exec(req.headers.range || '');
+      const a = r ? Number(r[1]) : 0;
+      const b = r ? Math.min(Number(r[2]), all.length - 1) : all.length - 1;
+      if (r) mode.ranges[name] = (mode.ranges[name] || 0) + 1;
+      const bytes = all.subarray(a, b + 1);
+      res.writeHead(r ? 206 : 200, { 'Content-Type': 'application/octet-stream', 'Content-Length': bytes.length, ...(r ? { 'Content-Range': `bytes ${a}-${b}/${all.length}` } : {}) });
       if (!mode.slow.has(name)) return res.end(bytes);
-      // langsam: 64 KB alle 100 ms
+      // langsam: 64 KB alle 100 ms je Verbindung
       let pos = 0;
       const tick = () => {
         if (res.destroyed) return;
@@ -136,6 +143,7 @@ module.exports = async function selftest(win, dir, hub) {
   try {
     // ---------------------------------------------------------------- Start: Meine Programme
     ok('Oberfläche bereit', await until('window.__ready === true', 30000));
+    ok('Standard: kein Auto-Update, kein Autostart', (await js(`window.__hub.settings().autoUpdate === false && window.__hub.settings().startWithSystem === false`)) && !hub.tray());
     await js(`window.__hub.setSetting('language', 'de')`);
     ok('Start auf "Meine Programme"', (await js('window.__hub.view')) === 'home' && (await text('.sect-head h2')) === 'Meine Programme', await text('.sect-head h2'));
     ok('Leiste: nur Meine Programme, Entdecken, Updates', (await js(`[...document.querySelectorAll('.nav-btn[data-view] .nav-label')].map(x => x.textContent).join('|')`)) === 'Meine Programme|Entdecken|Updates');
@@ -309,8 +317,14 @@ module.exports = async function selftest(win, dir, hub) {
     fs.rmSync(path.join(dir, 'exitcode.txt'));
     ok('Nochmal versuchen geht (Knopf bleibt)', (await text('.card[data-app="convert"] .act .btn')) === 'Installieren');
 
+    const msgs0 = hub.stats.jobMsgs;
+    const t0 = Date.now();
     await click('.card[data-app="jump"] .act .btn');
     ok('Langsamer Download zeigt Fortschritt', await until(`/Lädt herunter … \\d+ %/.test((document.querySelector('.card[data-app="jump"] .job-label') || {}).textContent || '')`, 10000));
+    await sleep(1500);
+    ok('Großes Paket kommt über mehrere Verbindungen', (mode.ranges['JumpNDodge-Windows_Installer.exe'] || 0) >= 3, mode.ranges);
+    const rate = (hub.stats.jobMsgs - msgs0) / ((Date.now() - t0) / 1000);
+    ok('Fortschritt sparsam (höchstens 5 Meldungen/s)', rate <= 5, rate);
     await click('.card[data-app="jump"] .act .icon-btn');
     ok('Abbrechen: Knopf wieder da', await until(`(document.querySelector('.card[data-app="jump"] .act .btn') || {}).textContent === 'Installieren'`, 8000));
     ok('Abbrechen: nichts installiert, keine Reste', !log().some((x) => x.startsWith('JumpNDodge')) && !fs.existsSync(path.join(dir, 'downloads', 'JumpNDodge-Windows_Installer.exe')) && !fs.existsSync(path.join(dir, 'downloads', 'JumpNDodge-Windows_Installer.exe.part')));
@@ -365,7 +379,33 @@ module.exports = async function selftest(win, dir, hub) {
     // neue Installation landet direkt im gemeinsamen Ordner
     nextReg([VID('1.14.0', path.join(target, 'Vidline')), TEXT('1.2.0', path.join(target, 'Textline')), WEB(path.join(target, 'Webline')), JUMP(path.join(target, 'JumpNDodge')), { ...CLIP, location: path.join(target, 'Clipline') }]);
     await click('.card[data-app="clip"] .act .btn');
+    ok('Verschieben: JumpNDodge parallel geladen und geprüft', (mode.ranges['JumpNDodge-Windows_Installer.exe'] || 0) >= 6, mode.ranges);
     ok('Neue Installation direkt in den Ordner', await until(`(document.querySelector('.card[data-app="clip"] .st') || {}).textContent === 'Installiert · 1.9.0'`, 15000) && log().includes(`Clipline-windows-x64-setup.exe|/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /SP- /CLOSEAPPLICATIONS /CURRENTUSER /DIR=${path.join(target, 'Clipline')}`), log().slice(-2));
+
+    // ---------------------------------------------------------------- Alles automatisch aktualisieren
+    // Clipline 1.9.1 und Webline 1.10.1 erscheinen; Webline ist gerade geöffnet
+    const CLIP2 = { ...CLIP, name: 'Clipline version 1.9.1', version: '1.9.1', location: path.join(target, 'Clipline') };
+    const WEB2 = { ...WEB(path.join(target, 'Webline')), name: 'Webline 1.10.1', version: '1.10.1' };
+    const restReg = [VID('1.14.0', path.join(target, 'Vidline')), TEXT('1.2.0', path.join(target, 'Textline')), JUMP(path.join(target, 'JumpNDodge'))];
+    fs.rmSync(path.join(dir, 'next-registry.json'), { force: true });
+    fs.writeFileSync(path.join(dir, 'next-registry-01.json'), JSON.stringify([...restReg, WEB(path.join(target, 'Webline')), CLIP2]));
+    fs.writeFileSync(path.join(dir, 'next-registry-02.json'), JSON.stringify([...restReg, WEB2, CLIP2]));
+    RELEASES['erqf1/clipline'].unshift(rel('v1.9.1', [addFile('Clipline-windows-x64-setup.exe', fakeBytes)], 'neu', '2026-11-10T12:00:00Z'));
+    RELEASES['erqf1/webline'].unshift(rel('v1.10.1', [addFile('Webline-Setup-1.10.1.exe', fakeBytes)], 'neu', '2026-11-10T12:00:00Z'));
+    mode.rev++;
+    fs.writeFileSync(path.join(dir, 'running.txt'), 'Webline.exe');
+    await js(`window.__hub.setSetting('autoUpdate', true)`);
+    await sleep(200);
+    const autoLog = log().length;
+    hub.notes.length = 0;
+    await hub.refresh(true, true);
+    ok('Auto-Update: Clipline still aktualisiert', await until(`(() => { window.__hub.go('discover'); return (document.querySelector('.card[data-app="clip"] .st') || {}).textContent === 'Installiert · 1.9.1'; })()`, 15000) && log().slice(autoLog).includes('Clipline-windows-x64-setup.exe|/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /SP- /CLOSEAPPLICATIONS /CURRENTUSER'), log().slice(autoLog));
+    ok('Auto-Update: geöffnetes Webline nicht angefasst, keine Nachfrage', !log().slice(autoLog).some((x) => x.startsWith('Webline')) && !(await js(`!!document.querySelector('.dialog')`)));
+    ok('Auto-Update: Meldung "aktualisiert"', hub.notes.some((n) => n.title === 'Aktualisiert' && n.body.includes('Clipline')), hub.notes);
+    fs.writeFileSync(path.join(dir, 'running.txt'), '');
+    ok('Auto-Update: Webline nach dem Schließen nachgeholt', await until(() => log().slice(autoLog).includes('Webline-Setup-1.10.1.exe|/S /currentuser') && hub.state.installed.html && hub.state.installed.html.version === '1.10.1', 15000), log().slice(autoLog));
+    await js(`window.__hub.setSetting('autoUpdate', false)`);
+    ok('Auto-Update wieder aus (gespeichert)', JSON.parse(fs.readFileSync(path.join(dir, 'userdata', 'settings.json'), 'utf8')).autoUpdate === false);
 
     // ---------------------------------------------------------------- GitHub-Limit und Zwischenspeicher
     const calls = mode.apiCalls;
