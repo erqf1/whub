@@ -1,6 +1,6 @@
 # Stand W Hub 1.2.0
 
-**IN ARBEIT** – Code fertig, Linux-Selbsttest grün; wartet auf den Windows-Selbsttest in der CI, dann Tag `v1.2.0` und Release-Lauf.
+**IN ARBEIT** – Code fertig, Selbsttest in der CI grün (Windows 112/112, Hintergrund 32/32 auf Windows, Linux, macOS). Release-Lauf v1.2.0 läuft (von Hand gestartet, weil Tag-Pushes aus der Cloud-Session abgelehnt werden).
 
 ## Was neu ist
 
@@ -47,7 +47,7 @@ Einzelverbindung entspricht eher der gedrosselten Messung.)
   Prüfung beim Start, Auto-Update mit laufendem Programm, parallele Downloads (Prüfsumme, mehrere Verbindungen,
   schneller als eine, ohne Range, kaputte Stücke, Dauerfehler, Abbrechen ohne Reste), Leerlauf, Symbol-Menü
   „Nach Updates suchen“, Öffnen, Ein-/Ausschalten im Einstellungsdialog, X schließt nur das Fenster.
-  Linux: 32 von 32 bestanden.
+  CI: Windows Teil 1 112/112, Teil 2 auf Windows, Linux und macOS je 32/32.
 - Neu: `.github/workflows/test.yml` – Selbsttest bei jedem Push auf main (Windows, Linux, macOS).
 
 ## Website (vom Nutzer hochzuladen)
