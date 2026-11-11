@@ -17,6 +17,7 @@ const SEG = {
   conns: 6, // Verbindungen gleichzeitig (gemessen bei GitHub: 1 -> 23 MB/s, 4 -> 40 MB/s, 6 -> 53 MB/s)
   tries: 3, // Versuche je Stück
   tick: 250, // höchstens alle 250 ms eine Fortschrittsmeldung
+  stall: 15000, // so lange ohne neue Daten -> diese Anfrage abbrechen und das Stück neu versuchen
 };
 const UA = { 'User-Agent': 'W-Hub' };
 // Jede Verbindung bekommt eine eigene Sitzung im Speicher (eigener Socket-Pool): sonst legt Chromium alle
@@ -108,19 +109,36 @@ async function download(url, file, total, onProgress, signal, opts = {}) {
       const loadChunk = async ([a, b], slot) => {
         for (let attempt = 1; ; attempt++) {
           let counted = 0;
+          // Wächter: kommt eine Weile nichts (hängende Verbindung - Chromium versucht abgebrochene
+          // Verbindungen teils still neu), nur diese Anfrage abbrechen und das Stück neu laden
+          const rc = new AbortController();
+          const onMain = () => rc.abort();
+          ctrl.signal.addEventListener('abort', onMain, { once: true });
+          let stalled = false;
+          let timer = null;
+          const arm = () => {
+            clearTimeout(timer);
+            timer = setTimeout(() => { stalled = true; rc.abort(); }, cfg.stall);
+          };
           const count = (n) => {
             counted += n;
             bytes(n);
+            arm();
           };
           try {
-            const res = await get({ Range: `bytes=${a}-${b}` }, slot);
+            arm();
+            const res = await fetcher(slot).fetch(url, { signal: rc.signal, headers: { ...UA, Range: `bytes=${a}-${b}` }, cache: 'no-store' });
             if (res.status !== 206 || !res.body) throw err('download', `HTTP ${res.status}`);
-            if (await writeBody(res, fd, a, b - a + 1, count, ctrl.signal) !== b - a + 1) throw err('download', 'short');
+            arm();
+            if (await writeBody(res, fd, a, b - a + 1, count, rc.signal) !== b - a + 1) throw err('download', 'short');
             return;
           } catch (e) {
             got -= counted; // dieses Stück zählt neu
-            if (ctrl.signal.aborted || attempt >= cfg.tries) throw e;
+            if (ctrl.signal.aborted || attempt >= cfg.tries) throw stalled ? err('download', 'stalled') : e;
             await new Promise((r) => setTimeout(r, 400 * attempt));
+          } finally {
+            clearTimeout(timer);
+            ctrl.signal.removeEventListener('abort', onMain);
           }
         }
       };
