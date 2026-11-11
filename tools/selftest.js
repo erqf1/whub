@@ -403,7 +403,14 @@ module.exports = async function selftest(win, dir, hub) {
     ok('Auto-Update: geöffnetes Webline nicht angefasst, keine Nachfrage', !log().slice(autoLog).some((x) => x.startsWith('Webline')) && !(await js(`!!document.querySelector('.dialog')`)));
     ok('Auto-Update: Meldung "aktualisiert"', hub.notes.some((n) => n.title === 'Aktualisiert' && n.body.includes('Clipline')), hub.notes);
     fs.writeFileSync(path.join(dir, 'running.txt'), '');
-    ok('Auto-Update: Webline nach dem Schließen nachgeholt', await until(() => log().slice(autoLog).includes('Webline-Setup-1.10.1.exe|/S /currentuser') && hub.state.installed.html && hub.state.installed.html.version === '1.10.1', 15000), log().slice(autoLog));
+    const webDone = async () => {
+      for (let i = 0; i < 150; i++) {
+        if (log().slice(autoLog).includes('Webline-Setup-1.10.1.exe|/S /currentuser') && hub.state.installed.html && hub.state.installed.html.version === '1.10.1') return true;
+        await sleep(100);
+      }
+      return false;
+    };
+    ok('Auto-Update: Webline nach dem Schließen nachgeholt', await webDone(), { log: log().slice(autoLog), html: hub.state.installed.html });
     await js(`window.__hub.setSetting('autoUpdate', false)`);
     ok('Auto-Update wieder aus (gespeichert)', JSON.parse(fs.readFileSync(path.join(dir, 'userdata', 'settings.json'), 'utf8')).autoUpdate === false);
 
