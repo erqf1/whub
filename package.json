@@ -1,7 +1,7 @@
 {
   "name": "whub",
   "productName": "W Hub",
-  "version": "1.2.1",
+  "version": "1.2.2",
   "description": "Alle Programme von W Software an einem Ort: durchblättern, suchen, installieren und aktuell halten.",
   "main": "src/main.js",
   "private": true,
