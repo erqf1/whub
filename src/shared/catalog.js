@@ -160,21 +160,24 @@ const APPS = [
   },
   {
     id: 'jump', name: 'JumpNDodge', repo: 'erqf1/JumpNDodge', color: '#f97316', category: 'games', site: `${SITE}/jump/`,
-    keywords: 'game jump dodge spiel springen multiplayer rangliste',
+    keywords: 'game jump dodge spiel springen multiplayer online rangliste rust',
+    // Rust Edition (ab 5.0): Pakete wie bei Vidline. Gleiche AppId wie der alte Installer -> Update an Ort und Stelle.
     // dataDir: Spielstand liegt neben der EXE und wird beim Verschieben mitgenommen
     win: { kind: 'inno', keys: ['{B44A592F-4DB5-4419-BCA6-7C5F80AA4472}_is1'], names: /^JumpNDodge\b/, exe: 'JumpNDodge.exe', dataDir: 'data' },
-    assets: { win: /^JumpNDodge-Windows_Installer\.exe$/ },
-    tagline: { en: 'Jump, dodge, survive.', de: 'Springen, ausweichen, überleben.' },
+    linux: { pkg: 'jumpndodge' }, mac: { app: 'JumpNDodge.app' },
+    assets: QT_ASSETS('jumpndodge', 'JumpNDodge'),
+    tagline: { en: 'Jump, dodge, survive – now online.', de: 'Springen, ausweichen, überleben – jetzt auch online.' },
     about: {
-      en: 'The first W Software game: jump over obstacles, dodge what falls from above and survive as long as you can. Eight difficulties, powers, cosmetics, a 2-player mode and an online leaderboard.',
-      de: 'Das erste Spiel von W Software: über Hindernisse springen, ausweichen, was von oben kommt, und so lange wie möglich überleben. Acht Schwierigkeiten, Powers, Kosmetik, ein 2-Spieler-Modus und eine Online-Rangliste.',
+      en: 'The first W Software game, now as the Rust Edition: jump over obstacles, dodge what falls from above and survive as long as you can. Eight difficulties, powers, cosmetics, two players on one keyboard, online versus and co-op and an online leaderboard.',
+      de: 'Das erste Spiel von W Software, jetzt als Rust Edition: über Hindernisse springen, ausweichen, was von oben kommt, und so lange wie möglich überleben. Acht Schwierigkeiten, Powers, Kosmetik, zwei Spieler an einer Tastatur, Online-VS und -Koop und eine Online-Rangliste.',
     },
     features: [
+      { en: ['Online with a friend', 'Create a room, send the 4-character code, play versus or co-op. Or host your own server.'], de: ['Online zu zweit', 'Raum erstellen, 4-stelligen Code schicken, VS oder Koop spielen. Oder selbst einen Server hosten.'] },
       { en: ['Eight difficulties', 'From Easy to Hell and Dynamic, which gets faster the longer you survive.'], de: ['Acht Schwierigkeiten', 'Von Leicht bis Hölle und Dynamisch, das immer schneller wird, je länger du durchhältst.'] },
       { en: ['Powers and cosmetics', 'Spin for powers, equip trails, hats and faces and show them off.'], de: ['Powers und Kosmetik', 'Powers erdrehen, Spuren, Hüte und Gesichter ausrüsten und zeigen.'] },
-      { en: ['Together or against each other', '2-player co-op and versus on one keyboard, plus an online leaderboard with friends and squads.'], de: ['Zusammen oder gegeneinander', '2-Spieler-Koop und Versus an einer Tastatur, dazu Online-Rangliste mit Freunden und Squads.'] },
+      { en: ['Smooth and sharp', 'Runs at your monitor\'s refresh rate (144/165 Hz) and stays sharp at any scaling and in fullscreen.'], de: ['Flüssig und scharf', 'Läuft mit der Bildrate deines Monitors (144/165 Hz) und bleibt bei jeder Skalierung und im Vollbild scharf.'] },
     ],
-    shots: [],
+    shots: ['game.webp', 'online.webp', 'menu.webp'],
   },
   // ---- im Browser: werden nur geöffnet
   {

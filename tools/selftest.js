@@ -84,9 +84,9 @@ module.exports = async function selftest(win, dir, hub) {
     'erqf1/picline': [rel('v1.1.1', [{ ...addFile('Picline-Setup-1.1.1.exe', fakeBytes), digest: 'sha256:0000' }])],
     'erqf1/convertline': [rel('v1.0.0', [addFile('Convertline-Setup-1.0.0.exe', fakeBytes)])],
     'erqf1/GambelStrike2': [rel('v1.1.0', [addFile('GambelStrike2-v1.1.0-Windows.exe', fakeBytes), addFile('GambelStrike2-v1.1.0-offline.html', tiny('<html></html>'))])],
-    'erqf1/JumpNDodge': [rel('installer', [addFile('JumpNDodge-Windows_Installer.exe', big)])],
+    'erqf1/JumpNDodge': [rel('v5.0.0', [addFile('JumpNDodge-windows-x64-setup.exe', big), addFile('jumpndodge_amd64.deb', tiny('deb'))])],
   };
-  const mode = { limit: false, slow: new Set(['JumpNDodge-Windows_Installer.exe']), apiCalls: 0, notModified: 0, pages: [], rev: 0, ranges: {} };
+  const mode = { limit: false, slow: new Set(['JumpNDodge-windows-x64-setup.exe']), apiCalls: 0, notModified: 0, pages: [], rev: 0, ranges: {} };
   const server = http.createServer((req, res) => {
     const u = new URL(req.url, base);
     const m = /^\/repos\/([^/]+\/[^/]+)\/releases$/.exec(u.pathname);
@@ -322,12 +322,12 @@ module.exports = async function selftest(win, dir, hub) {
     await click('.card[data-app="jump"] .act .btn');
     ok('Langsamer Download zeigt Fortschritt', await until(`/Lädt herunter … \\d+ %/.test((document.querySelector('.card[data-app="jump"] .job-label') || {}).textContent || '')`, 10000));
     await sleep(1500);
-    ok('Großes Paket kommt über mehrere Verbindungen', (mode.ranges['JumpNDodge-Windows_Installer.exe'] || 0) >= 3, mode.ranges);
+    ok('Großes Paket kommt über mehrere Verbindungen', (mode.ranges['JumpNDodge-windows-x64-setup.exe'] || 0) >= 3, mode.ranges);
     const rate = (hub.stats.jobMsgs - msgs0) / ((Date.now() - t0) / 1000);
     ok('Fortschritt sparsam (höchstens 5 Meldungen/s)', rate <= 5, rate);
     await click('.card[data-app="jump"] .act .icon-btn');
     ok('Abbrechen: Knopf wieder da', await until(`(document.querySelector('.card[data-app="jump"] .act .btn') || {}).textContent === 'Installieren'`, 8000));
-    ok('Abbrechen: nichts installiert, keine Reste', !log().some((x) => x.startsWith('JumpNDodge')) && !fs.existsSync(path.join(dir, 'downloads', 'JumpNDodge-Windows_Installer.exe')) && !fs.existsSync(path.join(dir, 'downloads', 'JumpNDodge-Windows_Installer.exe.part')));
+    ok('Abbrechen: nichts installiert, keine Reste', !log().some((x) => x.startsWith('JumpNDodge')) && !fs.existsSync(path.join(dir, 'downloads', 'JumpNDodge-windows-x64-setup.exe')) && !fs.existsSync(path.join(dir, 'downloads', 'JumpNDodge-windows-x64-setup.exe.part')));
 
     // ---------------------------------------------------------------- Installationsordner und Verschieben
     // JumpNDodge liegt woanders und hat seinen Spielstand neben der EXE
@@ -335,7 +335,7 @@ module.exports = async function selftest(win, dir, hub) {
     fs.mkdirSync(path.join(oldJump, 'data'), { recursive: true });
     fs.writeFileSync(path.join(oldJump, 'JumpNDodge.exe'), 'x');
     fs.writeFileSync(path.join(oldJump, 'data', 'gameplay.json'), 'spielstand');
-    const JUMP = (loc) => entry('HKCU', '{B44A592F-4DB5-4419-BCA6-7C5F80AA4472}_is1', 'JumpNDodge', '4.9.1', 'JumpNDodge.exe', '/SILENT', loc);
+    const JUMP = (loc) => entry('HKCU', '{B44A592F-4DB5-4419-BCA6-7C5F80AA4472}_is1', 'JumpNDodge', '5.0.0', 'JumpNDodge.exe', '/SILENT', loc);
     setReg([VID('1.14.0'), TEXT('1.2.0'), WEB(), JUMP(oldJump)]);
     mode.slow.clear();
     await click('#refresh');
@@ -379,7 +379,7 @@ module.exports = async function selftest(win, dir, hub) {
     // neue Installation landet direkt im gemeinsamen Ordner
     nextReg([VID('1.14.0', path.join(target, 'Vidline')), TEXT('1.2.0', path.join(target, 'Textline')), WEB(path.join(target, 'Webline')), JUMP(path.join(target, 'JumpNDodge')), { ...CLIP, location: path.join(target, 'Clipline') }]);
     await click('.card[data-app="clip"] .act .btn');
-    ok('Verschieben: JumpNDodge parallel geladen und geprüft', (mode.ranges['JumpNDodge-Windows_Installer.exe'] || 0) >= 6, mode.ranges);
+    ok('Verschieben: JumpNDodge parallel geladen und geprüft', (mode.ranges['JumpNDodge-windows-x64-setup.exe'] || 0) >= 6, mode.ranges);
     ok('Neue Installation direkt in den Ordner', await until(`(document.querySelector('.card[data-app="clip"] .st') || {}).textContent === 'Installiert · 1.9.0'`, 15000) && log().includes(`Clipline-windows-x64-setup.exe|/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /SP- /CLOSEAPPLICATIONS /CURRENTUSER /DIR=${path.join(target, 'Clipline')}`), log().slice(-2));
 
     // ---------------------------------------------------------------- Alles automatisch aktualisieren
