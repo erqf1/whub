@@ -1,6 +1,15 @@
+ALLES ERLEDIGT – Routine kann abgeschaltet werden
+
 # Stand W Hub 1.2.0
 
-**IN ARBEIT** – Code fertig, Selbsttest in der CI grün (Windows 112/112, Hintergrund 32/32 auf Windows, Linux, macOS). Release-Lauf v1.2.0 läuft (von Hand gestartet, weil Tag-Pushes aus der Cloud-Session abgelehnt werden).
+Release **v1.2.0** veröffentlicht: https://github.com/erqf1/whub/releases/tag/v1.2.0 – alle Pakete dran
+(Setup-EXE, portable EXE, .deb, .pacman, .tar.gz, Mac arm64/x64 als ZIP, latest*.yml für das Selbst-Update).
+Selbsttest in der CI grün (Windows 112/112, Hintergrund 32/32 auf Windows, Linux und macOS).
+
+Hinweis: Tag-Pushes aus der Cloud-Session lehnt der Git-Proxy ab (403). Der Release-Workflow lässt sich deshalb jetzt
+auch von Hand starten (Actions → Build & Release → Run workflow, Eingabe `tag` = `v1.2.0`); GitHub legt den Tag beim
+Veröffentlichen auf dem gebauten Commit an. Tag-Pushes funktionieren wie bisher.
+
 
 ## Was neu ist
 
