@@ -179,19 +179,6 @@ const APPS = [
     ],
     shots: ['game.webp', 'online.webp', 'menu.webp'],
   },
-  // ---- im Browser: brauchen den Server (Sync, Dateien), werden online im eigenen Fenster geöffnet
-  {
-    id: 'voca', name: 'Voca', category: 'web', color: '#10b981', site: `${SITE}/`, web: `${SITE}/`,
-    keywords: 'latein vokabeln latin vocabulary schule lernen',
-    tagline: { en: 'Practice Latin vocabulary and forms.', de: 'Latein-Vokabeln und Formen üben.' },
-    about: { en: 'Vocabulary trainer for Latin with forms, tests and progress that syncs between your devices.', de: 'Vokabeltrainer für Latein mit Formen, Tests und Fortschritt, der zwischen deinen Geräten synchronisiert wird.' },
-  },
-  {
-    id: 'files', name: 'Files', category: 'web', color: '#10b981', site: `${SITE}/files/`, web: `${SITE}/files/`,
-    keywords: 'dateien teilen share upload download ordner cloud',
-    tagline: { en: 'Share files and folders with direct links.', de: 'Dateien und Ordner teilen, mit Direktlinks.' },
-    about: { en: 'Upload files and folders and share them with direct links. Members get their own area.', de: 'Dateien und Ordner hochladen und mit Direktlinks teilen. Mitglieder bekommen einen eigenen Bereich.' },
-  },
   // ---- Web-Programme: fest eingebaut und offline nutzbar (Kategorie webapps). Quelle: mert.win<root>, beim Bauen als
   // Schnappschuss mitgeliefert, danach still aktualisiert. Neue Programme: nur hier eintragen.
   //   root  = Ordner auf der Website (Startseite des Programms), icon = Symbol auf der Website
@@ -214,7 +201,7 @@ const APPS = [
   },
   {
     id: 'skin', name: 'Skin-Editor', category: 'webapps', color: '#10b981', root: '/skin/', icon: '/app-icons/skin-192.png', site: `${SITE}/skin/`,
-    keywords: 'minecraft skin cape editor 3d pixel',
+    keywords: 'minecraft skin cape editor 3d',
     tagline: { en: 'Edit skins and capes in 3D.', de: 'Skins und Capes in 3D bearbeiten.' },
     about: {
       en: 'A Minecraft skin and cape editor with a 3D view, layers, mirroring, undo and animated MinecraftCapes capes.',
@@ -281,6 +268,19 @@ const APPS = [
     keywords: 'deal dealline angebote',
     tagline: { en: 'New on mert.win.', de: 'Neu auf mert.win.' },
     about: { en: 'Dealline from mert.win, built into W Hub.', de: 'Dealline von mert.win, fest eingebaut in W Hub.' },
+  },
+  // ---- im Browser: brauchen den Server (Sync, Dateien), werden online im eigenen Fenster geöffnet
+  {
+    id: 'voca', name: 'Voca', category: 'web', color: '#10b981', site: `${SITE}/`, web: `${SITE}/`,
+    keywords: 'latein vokabeln latin vocabulary schule lernen',
+    tagline: { en: 'Practice Latin vocabulary and forms.', de: 'Latein-Vokabeln und Formen üben.' },
+    about: { en: 'Vocabulary trainer for Latin with forms, tests and progress that syncs between your devices.', de: 'Vokabeltrainer für Latein mit Formen, Tests und Fortschritt, der zwischen deinen Geräten synchronisiert wird.' },
+  },
+  {
+    id: 'files', name: 'Files', category: 'web', color: '#10b981', site: `${SITE}/files/`, web: `${SITE}/files/`,
+    keywords: 'dateien teilen share upload download ordner cloud',
+    tagline: { en: 'Share files and folders with direct links.', de: 'Dateien und Ordner teilen, mit Direktlinks.' },
+    about: { en: 'Upload files and folders and share them with direct links. Members get their own area.', de: 'Dateien und Ordner hochladen und mit Direktlinks teilen. Mitglieder bekommen einen eigenen Bereich.' },
   },
 ];
 
