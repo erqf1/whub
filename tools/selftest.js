@@ -146,16 +146,16 @@ module.exports = async function selftest(win, dir, hub) {
     ok('Standard: kein Auto-Update, kein Autostart', (await js(`window.__hub.settings().autoUpdate === false && window.__hub.settings().startWithSystem === false`)) && !hub.tray());
     await js(`window.__hub.setSetting('language', 'de')`);
     ok('Start auf "Meine Programme"', (await js('window.__hub.view')) === 'home' && (await text('.sect-head h2')) === 'Meine Programme', await text('.sect-head h2'));
-    ok('Leiste: nur Meine Programme, Entdecken, Updates', (await js(`[...document.querySelectorAll('.nav-btn[data-view] .nav-label')].map(x => x.textContent).join('|')`)) === 'Meine Programme|Entdecken|Updates');
-    ok('Startseite: installierte Programme + Web-Apps (8)', (await homeKeys()) === 'vid,clip,text,voca,files,web,skin,pse', await homeKeys());
+    ok('Leiste: Meine Programme, Entdecken, Web-Programme, Updates', (await js(`[...document.querySelectorAll('.nav-btn[data-view] .nav-label')].map(x => x.textContent).join('|')`)) === 'Meine Programme|Entdecken|Web-Programme|Updates');
+    ok('Startseite: installierte Programme, Web-Programme, Web-Apps (8)', (await homeKeys()) === 'vid,clip,text,skin,pse,web,voca,files', await homeKeys());
     ok('Update-Punkt auf Vidline-Kachel', await js(`!!document.querySelector('.tile[data-app="vid"] .tile-dot')`));
     ok('Updates-Zähler 2', (await text('.nav-btn[data-view="updates"] .count')) === '2');
     ok('Hinweis oben: 2 Updates', (await text('.banner')).includes('2 Updates verfügbar'));
 
     // ---------------------------------------------------------------- Entdecken (ein Tab mit Filter und Sortierung)
     await click('.nav-btn[data-view="discover"]');
-    ok('Katalog: 13 Kacheln', (await js(`document.querySelectorAll('.card').length`)) === 13, await js(`document.querySelectorAll('.card').length`));
-    ok('Bereiche: Programme, Spiele, Im Browser, Legacy', (await js(`[...document.querySelectorAll('.sect-head h2')].map(x => x.textContent).join('|')`)) === 'Programme|Spiele|Im Browser|Legacy', await js(`[...document.querySelectorAll('.sect-head h2')].map(x => x.textContent).join('|')`));
+    ok('Katalog: 16 Kacheln (Dealline noch versteckt)', (await js(`document.querySelectorAll('.card').length`)) === 16, await js(`document.querySelectorAll('.card').length`));
+    ok('Bereiche: Programme, Spiele, Web-Programme, Im Browser, Legacy', (await js(`[...document.querySelectorAll('.sect-head h2')].map(x => x.textContent).join('|')`)) === 'Programme|Spiele|Web-Programme|Im Browser|Legacy', await js(`[...document.querySelectorAll('.sect-head h2')].map(x => x.textContent).join('|')`));
     ok('Convertline ist Legacy, JumpNDodge nicht mehr', !!(await js(`document.querySelector('.card[data-app="convert"] .badge')`)) && !(await js(`document.querySelector('.card[data-app="jump"] .badge')`)));
     ok('Erkannt: Vidline 1.13.0 mit Update auf 1.14.0', (await text('.card[data-app="vid"] .st')).includes('1.13.0 → 1.14.0'), await text('.card[data-app="vid"] .st'));
     ok('Erkannt: Clipline aktuell', (await text('.card[data-app="clip"] .st')) === 'Installiert · 1.9.0', await text('.card[data-app="clip"] .st'));
@@ -176,7 +176,7 @@ module.exports = async function selftest(win, dir, hub) {
     await js(`window.__hub.setQuery('pixel')`);
     ok('Suche "pixel" findet Picline', (await js(`[...document.querySelectorAll('.card')].map(c => c.dataset.app).join()`)) === 'pic');
     await js(`window.__hub.setQuery('minecraft')`);
-    ok('Suche "minecraft" findet Picline und Skin-Editor', (await js(`[...document.querySelectorAll('.card')].map(c => c.dataset.app).sort().join()`)) === 'pic,skin');
+    ok('Suche "minecraft" findet Picline, Skin-Editor und Minecraft-Tools', (await js(`[...document.querySelectorAll('.card')].map(c => c.dataset.app).sort().join()`)) === 'mc,pic,skin');
     await js(`window.__hub.setQuery('zzzz')`);
     ok('Suche ohne Treffer', (await text('.empty p')).includes('zzzz'));
     await js(`window.__hub.setQuery('')`);
@@ -199,7 +199,7 @@ module.exports = async function selftest(win, dir, hub) {
     await js(`document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))`);
     ok('Bild schließen mit Esc', !(await js(`!!document.querySelector('.lightbox')`)));
     await click('.back-row .btn');
-    ok('Zurück zu Entdecken', await until(`document.querySelectorAll('.card').length === 13`, 3000));
+    ok('Zurück zu Entdecken', await until(`document.querySelectorAll('.card').length === 16`, 3000));
 
     // ---------------------------------------------------------------- Installieren (Webline, nsis, für mich)
     nextReg([VID('1.13.0'), CLIP, TEXT('1.1.1'), WEB()]);
@@ -215,8 +215,8 @@ module.exports = async function selftest(win, dir, hub) {
     await click('.sect-head .btn.primary');
     ok('Alles aktuell nach "Alle aktualisieren"', await until(`(document.querySelector('.empty p') || {}).textContent === 'Alles ist aktuell.'`, 30000), await text('.page'));
     const l = log();
-    ok('Vidline-Update still über Inno, für mich', l.includes('Vidline-windows-x64-setup.exe|/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /SP- /CLOSEAPPLICATIONS /CURRENTUSER'), l);
-    ok('Textline-Update für alle Benutzer (bleibt, wo es ist)', l.includes('Textline-Setup-1.2.0.exe|/S /allusers'), l);
+    ok('Vidline-Update still über Inno, für mich, ohne neues Desktop-Symbol', l.includes('Vidline-windows-x64-setup.exe|/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /SP- /CLOSEAPPLICATIONS /CURRENTUSER /MERGETASKS=!desktopicon'), l);
+    ok('Textline-Update für alle Benutzer (bleibt, wo es ist), als Update (--updated)', l.includes('Textline-Setup-1.2.0.exe|/S /allusers --updated'), l);
     ok('Nacheinander, nicht gleichzeitig', l.indexOf(l.find((x) => x.startsWith('Vidline'))) < l.indexOf(l.find((x) => x.startsWith('Textline'))));
     ok('Updates-Zähler weg', (await text('.nav-btn[data-view="updates"] .count')) === '');
 
@@ -399,13 +399,13 @@ module.exports = async function selftest(win, dir, hub) {
     const autoLog = log().length;
     hub.notes.length = 0;
     await hub.refresh(true, true);
-    ok('Auto-Update: Clipline still aktualisiert', await until(`(() => { window.__hub.go('discover'); return (document.querySelector('.card[data-app="clip"] .st') || {}).textContent === 'Installiert · 1.9.1'; })()`, 15000) && log().slice(autoLog).includes('Clipline-windows-x64-setup.exe|/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /SP- /CLOSEAPPLICATIONS /CURRENTUSER'), log().slice(autoLog));
+    ok('Auto-Update: Clipline still aktualisiert', await until(`(() => { window.__hub.go('discover'); return (document.querySelector('.card[data-app="clip"] .st') || {}).textContent === 'Installiert · 1.9.1'; })()`, 15000) && log().slice(autoLog).includes('Clipline-windows-x64-setup.exe|/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /SP- /CLOSEAPPLICATIONS /CURRENTUSER /MERGETASKS=!desktopicon'), log().slice(autoLog));
     ok('Auto-Update: geöffnetes Webline nicht angefasst, keine Nachfrage', !log().slice(autoLog).some((x) => x.startsWith('Webline')) && !(await js(`!!document.querySelector('.dialog')`)));
     ok('Auto-Update: Meldung "aktualisiert"', hub.notes.some((n) => n.title === 'Aktualisiert' && n.body.includes('Clipline')), hub.notes);
     fs.writeFileSync(path.join(dir, 'running.txt'), '');
     const webDone = async () => {
       for (let i = 0; i < 150; i++) {
-        if (log().slice(autoLog).includes('Webline-Setup-1.10.1.exe|/S /currentuser') && hub.state.installed.html && hub.state.installed.html.version === '1.10.1') return true;
+        if (log().slice(autoLog).includes('Webline-Setup-1.10.1.exe|/S /currentuser --updated') && hub.state.installed.html && hub.state.installed.html.version === '1.10.1') return true;
         await sleep(100);
       }
       return false;

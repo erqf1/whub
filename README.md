@@ -4,6 +4,7 @@ Alle Programme von W Software an einem Ort: durchblättern, suchen, installieren
 
 ![W Hub](https://mert.win/hub/img/home-de.webp)
 
+- **Web-Programme, fest eingebaut:** QR-Codes, Skin-Editor, Hintergrund entfernen, Minecraft-Tools, Periodensystem, Webgames und Dealline laufen offline im eigenen Fenster und werden still von mert.win aktualisiert.
 - **Meine Programme:** alle installierten Programme und die Web-Apps als Start-Kacheln, sortierbar per Ziehen und in eigenen Ordnern.
 - **Web-Apps als eigene App:** Voca, Files & Co. öffnen in einem eigenen Fenster mit eigenem Speicher, wie mit Webline geöffnet.
 - **Entdecken:** Programme, Spiele und alles, was im Browser läuft. Jede App hat ihre eigene Seite wie auf der Website, mit Bildern, Funktionen und den Neuerungen der letzten Versionen.
@@ -41,6 +42,9 @@ Unter Linux und macOS lädt W Hub das Paket herunter und öffnet es; die Install
 - Automatisch aktualisieren betrifft Programme, die sich still installieren lassen (Windows-Installer, einzelne EXE, Offline-Datei). Unter Linux und macOS gibt es dafür weiter eine Systemmeldung, weil die Installation das System abschließt.
 - Eigener Installationsordner: Inno Setup mit `/DIR="…"`, electron-builder mit `/D=…` (immer zuletzt, ohne Anführungszeichen). Verschieben = neuestes Paket laden und prüfen, still deinstallieren, still im neuen Ordner installieren; Daten neben der EXE (JumpNDodge `data`) werden mitkopiert.
 
+- Web-Programme: W Hub lädt jede Seite (`https://mert.win/<ordner>/`) samt aller Dateien des Ordners und der gemeinsam benutzten Dateien (z. B. `/app-icons/acryl.css`). Gefolgt wird `href`/`src`/`srcset`, `url()`/`@import`, `import`/`fetch`/`new URL(…, import.meta.url)` und festen Pfaden in Skripten – nur auf demselben Server; dazu fest versionierte Bibliotheken von jsDelivr/unpkg/cdnjs (ohne Cookie). Die Seite ist durch einen Zugangscode geschützt (nginx prüft das Cookie `w_zugang`); W Hub benutzt dafür den freigegebenen Code `w`. Gespeichert wird nach Prüfsumme im Benutzerordner (`webapps/`), ausgeliefert über `whub-web://mert.win/…` mit der Website-Wurzel als Basis. Abgleich beim Start und alle 6 Stunden mit `If-None-Match`/`If-Modified-Since` und Prüfsumme; offline läuft die gespeicherte Version. Ein Schnappschuss kommt beim Bauen mit (`node tools/fetch-webapps.js` → `webapps-snapshot/` → `resources/webapps`); ist mert.win dabei nicht erreichbar, wird ohne gebaut (Warnung, kein Abbruch). Neue Programme: Eintrag mit `category: 'webapps'` in `src/shared/catalog.js`.
+- Desktop-Symbol (Windows): nur bei der Erst-Installation (`build/installer.nsh`), Updates fassen es nie an, Deinstallieren entfernt es. Updates anderer Programme über W Hub laufen mit `--updated` (electron-builder) bzw. `/MERGETASKS=!desktopicon` (Inno Setup).
+
 ## Selbst bauen
 
 ```
@@ -48,9 +52,10 @@ npm install
 npm start            # Entwicklung
 npm run build:win    # Windows-Pakete nach dist/
 npm run icon         # assets/icon.* aus dem Logo neu erzeugen
+npm run webapps      # Schnappschuss der Web-Programme von mert.win nach webapps-snapshot/
 ```
 
-Selbsttest (unsichtbar, mit Testserver statt GitHub und einem Test-Installer, der nichts installiert). Teil 1 (Oberfläche, Installieren, Updates, Verschieben, Auto-Update) braucht Windows; Teil 2 (Start mit dem System ohne Fenster, Symbol im Infobereich, parallele Downloads) läuft überall, unter Linux ohne Bildschirm über `xvfb-run`. Bei jedem Push auf `main` laufen beide auf GitHub Actions:
+Selbsttest (unsichtbar, mit Testserver statt GitHub und einem Test-Installer, der nichts installiert). Teil 1 (Oberfläche, Installieren, Updates, Verschieben, Auto-Update) braucht Windows; Teil 2 (Start mit dem System ohne Fenster, Symbol im Infobereich, parallele Downloads) und Teil 3 (Web-Programme mit einem Mini-Server, der den Zugangsschutz nachbildet: Laden, offline, Updates, absolute Pfade) laufen überall, unter Linux ohne Bildschirm über `xvfb-run`. Bei jedem Push auf `main` laufen beide auf GitHub Actions:
 
 ```
 node tools/run-selftest.js

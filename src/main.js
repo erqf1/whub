@@ -2,7 +2,7 @@
 
 // W Hub - Hauptprozess: Fenster, Einstellungen, Katalog-Stand (GitHub + installierte Programme),
 // Warteschlange für Installationen und Updates, Selbst-Update, Hintergrundbetrieb mit Symbol im Infobereich.
-const { app, BrowserWindow, ipcMain, dialog, shell, Menu, nativeTheme, Notification, Tray, nativeImage } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, shell, Menu, nativeTheme, Notification, Tray, nativeImage, session } = require('electron');
 const fs = require('fs');
 const path = require('path');
 const { execFileSync } = require('child_process');
@@ -11,15 +11,19 @@ const inst = require('./installed');
 const setup = require('./installer');
 const { APPS, byId, pickAsset, newer } = require('./shared/catalog');
 const { t: tr } = require('./shared/i18n');
+const webprograms = require('./webprograms');
 
 const APP_ID = 'win.mert.WHub';
 const REPO = 'erqf1/whub';
 // --selftest <ordner>: Selbsttest; --siteshots <ordner>: Bilder für die Website (beides unsichtbar);
 // --selftest-bg <ordner>: Selbsttest des Hintergrundbetriebs (Start mit dem System, ohne Fenster)
-const testArg = ['--selftest-bg', '--selftest', '--siteshots'].find((a) => process.argv.includes(a));
+// --selftest-web <ordner>: Selbsttest der Web-Programme (Laden mit Cookie, offline ausliefern, Updates)
+const testArg = ['--selftest-bg', '--selftest-web', '--selftest', '--siteshots'].find((a) => process.argv.includes(a));
 const selfTest = testArg ? process.argv[process.argv.indexOf(testArg) + 1] : null;
 // Mit dem System gestartet: kein Fenster, nur das Symbol im Infobereich (macOS meldet das selbst)
 let background = process.argv.includes('--autostart') || testArg === '--selftest-bg';
+// Web-Programme still abgleichen: immer, im Selbsttest nur auf Wunsch (der Test ruft den Abgleich selbst auf)
+const webAutoSync = !selfTest || process.env.WHUB_WEB_SYNC === '1';
 const HOUR = 60 * 60 * 1000;
 const CHECK_EVERY = 6 * HOUR;
 const RETRY_RUNNING = 30 * 60 * 1000; // laufende Programme: in 30 Minuten noch einmal versuchen
@@ -30,6 +34,7 @@ const gpuOff = background;
 if (gpuOff) app.disableHardwareAcceleration();
 
 if (process.platform === 'win32') app.setAppUserModelId(APP_ID);
+webprograms.registerScheme();
 if (selfTest) {
   app.setPath('userData', path.join(selfTest, 'userdata'));
   // Selbsttest läuft unsichtbar: Fehler nur ausgeben, nie als Fehlerfenster zeigen
@@ -41,6 +46,7 @@ if (selfTest) {
 
 let win = null;
 let tray = null;
+let web = null; // Web-Programme (src/webprograms.js)
 let settings = {};
 const userFile = (name) => path.join(app.getPath('userData'), name);
 const t = (key, vars) => tr(settings.language || 'en', key, vars);
@@ -77,13 +83,13 @@ const appsDir = () => (selfTest ? path.join(selfTest, 'apps') : path.join(proces
 const downloadDir = () => (selfTest ? path.join(selfTest, 'downloads') : path.join(app.getPath('temp'), 'W Hub'));
 
 // ---------------------------------------------------------------- Stand: Releases + installierte Programme
-const state = { releases: {}, installed: {}, checked: 0, error: null, jobs: {} };
+const state = { releases: {}, installed: {}, checked: 0, error: null, jobs: {}, web: null };
 
 function send(channel, payload) {
   if (win && !win.isDestroyed()) win.webContents.send(channel, payload);
 }
 function snapshot() {
-  return { releases: state.releases, installed: state.installed, checked: state.checked, error: state.error, jobs: state.jobs, sys: SYS };
+  return { releases: state.releases, installed: state.installed, checked: state.checked, error: state.error, jobs: state.jobs, sys: SYS, web: web ? web.status() : null };
 }
 
 let refreshing = null;
@@ -92,6 +98,8 @@ let firstCheck = true;
  *  dann werden Updates (falls eingestellt) gleich still eingereiht. */
 async function refresh(force = false, auto = false) {
   if (refreshing) return refreshing;
+  // Web-Programme still im Hintergrund abgleichen (offline läuft die gespeicherte Version)
+  if (web && webAutoSync) web.sync().catch(() => {});
   refreshing = (async () => {
     const withRepo = APPS.filter((a) => a.repo);
     const [installed, results] = await Promise.all([
@@ -467,9 +475,22 @@ const webWins = new Map();
 /** Selbsttest: Seiten vom Testserver statt von mert.win */
 const siteUrl = (u) => (process.env.WHUB_SITE ? String(u).replace('https://mert.win', process.env.WHUB_SITE) : u);
 
-function openWebApp(id, url) {
+/** Seite, wenn ein Link ins Leere geht (nicht offline gespeichert und kein Internet) */
+function offlinePage() {
+  const dark = settings.mode === 'dark' || (settings.mode !== 'light' && nativeTheme.shouldUseDarkColors);
+  const esc = (x) => String(x).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
+  return `<!doctype html><html lang="${esc(settings.language || 'en')}"><meta charset="utf-8"><title>${esc(t('webOfflineTitle'))}</title>
+<style>html{color-scheme:${dark ? 'dark' : 'light'}}body{margin:0;min-height:100vh;display:grid;place-items:center;font:15px/1.5 system-ui,sans-serif;background:${dark ? '#14161b' : '#f3f4f7'};color:${dark ? '#e8eaf0' : '#1b1d23'}}
+main{max-width:420px;padding:24px;text-align:center}h1{font-size:19px;margin:0 0 8px}p{margin:0 0 16px;opacity:.75}button{font:inherit;padding:8px 16px;border-radius:8px;border:1px solid #8886;background:transparent;color:inherit;cursor:pointer}</style>
+<main><h1>${esc(t('webOfflineTitle'))}</h1><p>${esc(t('webOfflineText'))}</p><button onclick="history.length>1?history.back():location.reload()">${esc(t('back'))}</button></main></html>`;
+}
+
+const opening = new Set();
+async function openWebApp(id, url) {
   const appDef = byId[id];
-  const target = appDef && siteUrl(url || appDef.web);
+  const program = appDef && appDef.category === 'webapps';
+  if (program && (!web || !web.available(id))) return false;
+  const target = program ? url || web.url(id) : appDef && siteUrl(url || appDef.web);
   if (!target) return false;
   const key = `${id}|${target}`;
   const open = webWins.get(key);
@@ -481,8 +502,22 @@ function openWebApp(id, url) {
   }
   const saved = (settings.webWindows || {})[id] || {};
   const dark = settings.mode === 'dark' || (settings.mode !== 'light' && nativeTheme.shouldUseDarkColors);
-  const icon = path.join(__dirname, '..', 'assets', 'icons', `${id}.png`);
+  const bundled = path.join(__dirname, '..', 'assets', 'icons', `${id}.png`);
+  const icon = fs.existsSync(bundled) ? bundled : (program && web.iconFile(id)) || bundled;
   const partition = `persist:web-${id}`;
+  if (program) {
+    if (opening.has(id)) return true;
+    opening.add(id);
+    // eigener Speicherbereich je Programm; whub-web dort ausliefern, alten Speicher (bis 1.2) einmal übernehmen
+    web.prepare(session.fromPartition(partition));
+    await web.migrate(id, app.getPath('userData')).finally(() => opening.delete(id));
+    const again = webWins.get(`${id}|${target}`);
+    if (again && !again.isDestroyed()) {
+      again.show();
+      again.focus();
+      return true;
+    }
+  }
   const w = new BrowserWindow({
     width: saved.width || 1200,
     height: saved.height || 800,
@@ -493,7 +528,7 @@ function openWebApp(id, url) {
     show: false,
     title: appDef.name,
     icon: fs.existsSync(icon) ? icon : undefined,
-    backgroundColor: dark ? '#14161b' : '#ffffff',
+    backgroundColor: program ? '#07080c' : dark ? '#14161b' : '#ffffff',
     autoHideMenuBar: true,
     webPreferences: { partition, contextIsolation: true, sandbox: true, spellcheck: true, backgroundThrottling: !selfTest },
   });
@@ -505,7 +540,7 @@ function openWebApp(id, url) {
   const inside = (u) => {
     try {
       const x = new URL(u);
-      return x.origin === origin || /(^|\.)mert\.win$/i.test(x.hostname);
+      return x.origin === origin || x.protocol === `${webprograms.SCHEME}:` || (x.protocol === 'https:' && /(^|\.)mert\.win$/i.test(x.hostname));
     } catch {
       return false;
     }
@@ -519,6 +554,13 @@ function openWebApp(id, url) {
     return { action: 'deny' };
   });
   w.webContents.on('will-navigate', (e, u) => {
+    // Link direkt auf https://mert.win/…: offline gespeicherte Seiten lieber aus dem Speicher
+    const local = program && web.localFor(u);
+    if (local) {
+      e.preventDefault();
+      w.loadURL(local);
+      return;
+    }
     if (!inside(u)) {
       e.preventDefault();
       external(u);
@@ -769,6 +811,7 @@ ipcMain.handle('hub:pick-dir', async (_e, current) => {
   return r.canceled || !r.filePaths.length ? null : r.filePaths[0];
 });
 ipcMain.handle('hub:web', (_e, id, url) => openWebApp(id, url));
+ipcMain.handle('hub:web-sync', () => (web ? web.sync().then(() => web.status()) : null));
 ipcMain.handle('hub:reveal', (_e, id) => {
   const have = state.installed[id];
   if (have && have.exe && fs.existsSync(have.exe)) shell.showItemInFolder(have.exe);
@@ -863,6 +906,16 @@ if (!selfTest && !app.requestSingleInstanceLock()) {
     settings = readJson(userFile('settings.json'), {});
     gh.init(path.join(app.getPath('userData'), 'cache'));
     inst.init(app.getPath('userData'));
+    web = webprograms.create({
+      builtinDir: process.env.WHUB_WEB_BUILTIN || (app.isPackaged ? path.join(process.resourcesPath, 'webapps') : path.join(__dirname, '..', 'webapps-snapshot')),
+      userDir: userFile('webapps'),
+      origin: process.env.WHUB_WEB_ORIGIN || undefined,
+      cdnOrigin: process.env.WHUB_WEB_CDN || undefined,
+      offlinePage,
+      onChange: () => send('hub:state', snapshot()),
+    });
+    // Symbole der Web-Programme auch in der Oberfläche von W Hub
+    web.prepare(session.defaultSession);
     if (process.platform === 'darwin' && !selfTest) {
       try {
         if (app.getLoginItemSettings().wasOpenedAtLogin) background = true;
@@ -892,8 +945,8 @@ if (!selfTest && !app.requestSingleInstanceLock()) {
     setupAutoUpdate();
     // regelmäßig nachsehen, solange W Hub läuft (auch nur im Infobereich)
     if (!selfTest) setInterval(() => refresh(false, true).then(updateTray, () => {}), CHECK_EVERY);
-    const hubApi = { state, queue, webWins, stats, notes, refresh, autoUpdate, openWindow, trayCheck, tray: () => tray, win: () => win, loginItem: () => loginItem, autostartFile, setup };
-    if (selfTest) require(path.join(__dirname, '..', 'tools', { '--siteshots': 'siteshots.js', '--selftest-bg': 'selftest-bg.js' }[testArg] || 'selftest.js'))(win, selfTest, hubApi);
+    const hubApi = { web: () => web, openWebApp, state, queue, webWins, stats, notes, refresh, autoUpdate, openWindow, trayCheck, tray: () => tray, win: () => win, loginItem: () => loginItem, autostartFile, setup };
+    if (selfTest) require(path.join(__dirname, '..', 'tools', { '--siteshots': 'siteshots.js', '--selftest-bg': 'selftest-bg.js', '--selftest-web': 'selftest-web.js' }[testArg] || 'selftest.js'))(win, selfTest, hubApi);
   });
 }
 

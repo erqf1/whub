@@ -40,6 +40,17 @@ if (isWin) {
   execFileSync(csc, ['/nologo', '/target:winexe', `/out:${path.join(dir, 'FakeSetup.exe')}`, path.join(dir, 'FakeSetup.cs')], { stdio: 'inherit', windowsHide: true });
 }
 
+/** Kleiner eingebauter Schnappschuss für Teil 1 (ohne Server): je Programm eine Startseite */
+function webFixture(target, ids) {
+  const W = require(path.join(root, 'src', 'webapps'));
+  const { byId } = require(path.join(root, 'src', 'shared', 'catalog'));
+  for (const id of ids) {
+    const body = Buffer.from(`<!doctype html><title>${byId[id].name}</title>`);
+    const hash = require('crypto').createHash('sha256').update(body).digest('hex');
+    W.commit(target, byId[id], { files: { [byId[id].root]: { hash, type: 'text/html', size: body.length, body } }, external: [], missing: [], modified: Date.parse('2026-11-14T22:57:54Z') }, { now: 1 });
+  }
+}
+
 function freePort() {
   return new Promise((resolve) => {
     const s = net.createServer();
@@ -86,6 +97,8 @@ function launch(args, env) {
   // 1) Oberfläche, Installieren, Updates, Verschieben (braucht Windows wegen FakeSetup.exe)
   if (isWin) {
     const port = await freePort();
+    const fixture = path.join(dir, 'webapps-fixture');
+    webFixture(fixture, ['skin', 'pse', 'web']);
     code = await launch([shots ? '--siteshots' : '--selftest', dir], {
       ...base,
       WHUB_API: `http://127.0.0.1:${port}`,
@@ -96,11 +109,13 @@ function launch(args, env) {
       WHUB_RETRY_MS: '1500',
       WHUB_SITE: `http://127.0.0.1:${port}`,
       WHUB_PICK_DIR: path.join(dir, 'W Software'),
+      WHUB_WEB_BUILTIN: fixture,
     });
   } else {
     console.log('Hinweis: Teil 1 (Installer) braucht Windows, hier nur der Hintergrund-Teil.');
   }
   if (shots) process.exit(code);
+  const onlyWeb = process.argv.includes('--only-web');
   // 2) Hintergrundbetrieb: Start mit dem System ohne Fenster, Auto-Update, parallele Downloads (alle Systeme)
   const bg = path.join(dir, 'hintergrund');
   fs.mkdirSync(path.join(bg, 'userdata'), { recursive: true });
@@ -111,7 +126,7 @@ function launch(args, env) {
   fs.writeFileSync(path.join(bg, 'userdata', 'settings.json'), JSON.stringify({ language: 'de', startWithSystem: true, autoUpdate: true, notify: true }));
   fs.writeFileSync(path.join(bg, 'running.txt'), path.basename(gs));
   const port = await freePort();
-  const code2 = await launch(['--selftest-bg', bg, '--autostart'], {
+  const code2 = onlyWeb ? 0 : await launch(['--selftest-bg', bg, '--autostart'], {
     ...base,
     WHUB_API: `http://127.0.0.1:${port}`,
     WHUB_TEST_PORT: String(port),
@@ -121,5 +136,19 @@ function launch(args, env) {
     WHUB_AUTOSTART_DIR: path.join(bg, 'autostart'),
     WHUB_SITE: `http://127.0.0.1:${port}`,
   });
-  process.exit(code || code2);
+  // 3) Web-Programme: Laden mit Zugangs-Cookie, offline ausliefern, Updates (alle Systeme)
+  const wd = path.join(dir, 'web');
+  fs.mkdirSync(path.join(wd, 'userdata'), { recursive: true });
+  fs.writeFileSync(path.join(wd, 'userdata', 'settings.json'), JSON.stringify({ language: 'de', checkOnStart: false }));
+  const port3 = await freePort();
+  const code3 = await launch(['--selftest-web', wd], {
+    ...base,
+    WHUB_API: `http://127.0.0.1:${port3}`,
+    WHUB_TEST_PORT: String(port3),
+    WHUB_REGISTRY: path.join(wd, 'registry.json'),
+    WHUB_WEB_ORIGIN: `http://127.0.0.1:${port3}`,
+    WHUB_WEB_CDN: `http://127.0.0.1:${port3}`,
+    WHUB_WEB_BUILTIN: path.join(wd, 'builtin'),
+  });
+  process.exit(code || code2 || code3);
 })();

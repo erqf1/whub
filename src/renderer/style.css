@@ -287,3 +287,10 @@ h1, h2, h3, h4, p { margin: 0; }
   .page { padding: 16px 16px 30px; }
   #checked { display: none; }
 }
+
+/* Web-Programme */
+.spin-ico .ico { animation: spin 0.9s linear infinite; }
+.sect .lead { margin: -6px 0 16px; max-width: 72ch; font-size: 13px; }
+.banner.info { background: var(--panel); border-color: var(--line); }
+.banner.info .ico { color: var(--muted); }
+.banner.info b { font-weight: 600; }

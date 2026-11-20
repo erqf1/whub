@@ -1,7 +1,7 @@
 {
   "name": "whub",
   "productName": "W Hub",
-  "version": "1.2.2",
+  "version": "1.3.0",
   "description": "Alle Programme von W Software an einem Ort: durchblättern, suchen, installieren und aktuell halten.",
   "main": "src/main.js",
   "private": true,
@@ -10,8 +10,9 @@
     "bundle": "node build.mjs",
     "start": "node build.mjs && electron .",
     "icon": "electron tools/make-icon.js",
-    "build": "node build.mjs && electron-builder",
-    "build:win": "node build.mjs && electron-builder -w"
+    "build": "node build.mjs && node tools/fetch-webapps.js && electron-builder",
+    "build:win": "node build.mjs && node tools/fetch-webapps.js && electron-builder -w",
+    "webapps": "node tools/fetch-webapps.js"
   },
   "license": "Apache-2.0",
   "author": {
@@ -42,7 +43,8 @@
     "productName": "W Hub",
     "executableName": "WHub",
     "directories": {
-      "output": "dist"
+      "output": "dist",
+      "buildResources": "build"
     },
     "files": [
       "src/*.js",
@@ -56,6 +58,7 @@
       "tools/selftest.js",
       "tools/selftest-bg.js",
       "tools/siteshots.js",
+      "tools/selftest-web.js",
       "package.json"
     ],
     "afterPack": "tools/afterPack.js",
@@ -86,9 +89,10 @@
       "oneClick": false,
       "perMachine": false,
       "allowToChangeInstallationDirectory": true,
-      "createDesktopShortcut": true,
+      "createDesktopShortcut": false,
       "createStartMenuShortcut": true,
-      "shortcutName": "W Hub"
+      "shortcutName": "W Hub",
+      "include": "build/installer.nsh"
     },
     "portable": {
       "artifactName": "WHub-${version}-portable.${ext}"
@@ -152,6 +156,15 @@
       "identity": "-",
       "hardenedRuntime": false,
       "minimumSystemVersion": "12.0"
-    }
+    },
+    "extraResources": [
+      {
+        "from": "webapps-snapshot",
+        "to": "webapps",
+        "filter": [
+          "**/*"
+        ]
+      }
+    ]
   }
 }

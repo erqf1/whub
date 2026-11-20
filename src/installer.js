@@ -220,9 +220,13 @@ async function runInstaller(exe, args) {
 function installArgs(kind, existing, allUsers, dir) {
   const machine = existing ? !!existing.machine : !!allUsers;
   const clean = dir ? String(dir).replace(/"/g, '').replace(/[\\/]+$/, '') : '';
-  if (kind === 'inno') return ['/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/SP-', '/CLOSEAPPLICATIONS', machine ? '/ALLUSERS' : '/CURRENTUSER', ...(clean ? [`/DIR="${clean}"`] : [])];
+  // Update am selben Ort: Desktop-Symbol nicht neu anlegen (nur die Erst-Installation legt es an).
+  //  Inno: Aufgabe "desktopicon" abwählen (ein vorhandenes Symbol bleibt, ein gelöschtes kommt nicht wieder);
+  //  NSIS (electron-builder): --updated, sonst löscht der alte Uninstaller das Symbol und der Installer legt es neu an.
+  const update = !!existing && !clean;
+  if (kind === 'inno') return ['/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/SP-', '/CLOSEAPPLICATIONS', machine ? '/ALLUSERS' : '/CURRENTUSER', ...(update ? ['/MERGETASKS=!desktopicon'] : []), ...(clean ? [`/DIR="${clean}"`] : [])];
   // NSIS: /D= muss ganz am Ende stehen und darf keine Anführungszeichen haben (Leerzeichen sind erlaubt)
-  if (kind === 'nsis') return ['/S', machine ? '/allusers' : '/currentuser', ...(clean ? [`/D=${clean}`] : [])];
+  if (kind === 'nsis') return ['/S', machine ? '/allusers' : '/currentuser', ...(update ? ['--updated'] : []), ...(clean ? [`/D=${clean}`] : [])];
   return [];
 }
 
