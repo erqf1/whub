@@ -27,6 +27,7 @@ contextBridge.exposeInMainWorld('api', {
   move: (ids) => invoke('hub:move', ids),
   pickDir: (current) => invoke('hub:pick-dir', current),
   web: (id, url) => invoke('hub:web', id, url),
+  webSync: () => invoke('hub:web-sync'),
   onState: (cb) => on('hub:state', cb),
   onJob: (cb) => on('hub:job', cb),
   onShow: (cb) => on('hub:show', cb),

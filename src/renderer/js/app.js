@@ -12,7 +12,8 @@ const ASSETS = '../../assets';
 
 let settings = {};
 let info = {};
-let hub = { releases: {}, installed: {}, jobs: {}, checked: 0, error: null, sys: {} };
+let hub = { releases: {}, installed: {}, jobs: {}, checked: 0, error: null, sys: {}, web: null };
+const WEB_BASE = 'whub-web://mert.win';
 let view = 'home';
 let current = null;
 let currentFolder = null;
@@ -61,8 +62,14 @@ function latest(id) {
   const list = hub.releases[id] || [];
   return list.find((r) => !r.prerelease) || list[0] || null;
 }
-/** kind: web | none | installed | update | unavailable | unknown */
+/** Stand eines Web-Programms (fest eingebaut) */
+const webState = (app) => (hub.web && hub.web.apps && hub.web.apps[app.id]) || {};
+/** "soon"-Programme erst zeigen, wenn sie da sind */
+const listed = (app) => !(app.soon && !webState(app).available);
+const APPS = () => C.APPS.filter(listed);
+/** kind: web | webprog | webmissing | none | installed | update | unavailable | unknown */
 function status(app) {
+  if (app.category === 'webapps') return { kind: webState(app).available ? 'webprog' : 'webmissing', web: webState(app) };
   if (!app.repo) return { kind: 'web' };
   const have = hub.installed[app.id];
   const rel = latest(app.id);
@@ -80,7 +87,7 @@ const activeJob = (id) => {
   return j && ['queued', 'download', 'install', 'uninstall', 'move'].includes(j.phase) ? j : null;
 };
 function updateList() {
-  return C.APPS.filter((a) => status(a).kind === 'update');
+  return APPS().filter((a) => status(a).kind === 'update');
 }
 function humanSize(n) {
   if (!n) return '';
@@ -93,7 +100,15 @@ function humanSize(n) {
   return `${n.toLocaleString(settings.language, { maximumFractionDigits: i > 1 ? 1 : 0 })} ${units[i]}`;
 }
 const fmtDate = (d) => (d ? new Date(d).toLocaleDateString(settings.language, { day: 'numeric', month: 'long', year: 'numeric' }) : '');
-const iconImg = (app, size) => h('img', { class: 'app-ico', src: `${ASSETS}/icons/${app.id}.png`, width: size, height: size, alt: '', draggable: 'false' });
+/** Symbol: mitgeliefert, sonst (neue Web-Programme) das Symbol der Website aus dem Speicher */
+const iconImg = (app, size) => h('img', { class: 'app-ico', src: `${ASSETS}/icons/${app.id}.png`, width: size, height: size, alt: '', draggable: 'false',
+  onerror: (e) => {
+    const img = e.currentTarget;
+    if (app.icon && !img.dataset.alt) {
+      img.dataset.alt = '1';
+      img.src = `${WEB_BASE}${app.icon}`;
+    } else img.style.visibility = 'hidden';
+  } });
 
 /** Liegt der Ordner eines installierten Programms im gemeinsamen Installationsordner? */
 function inInstallDir(have) {
@@ -135,9 +150,24 @@ async function askMove(apps) {
   ]);
   if (r === 'ok') await api.move(apps.map((a) => a.id));
 }
+/** Web-Programme von mert.win aktualisieren (von Hand) */
+async function syncWeb() {
+  const before = Object.fromEntries(C.WEBAPPS.map((a) => [a.id, webState(a).changed]));
+  const st = await api.webSync();
+  if (!st) return;
+  hub.web = st;
+  const changed = C.WEBAPPS.filter((a) => st.apps[a.id] && st.apps[a.id].changed && st.apps[a.id].changed !== before[a.id] && st.apps[a.id].available);
+  const errs = C.WEBAPPS.map((a) => st.apps[a.id] && st.apps[a.id].error).filter((e) => e && e !== 'missing');
+  if (changed.length) toast(t('webUpdated', { list: changed.map((a) => a.name).join(', ') }));
+  else if (errs.includes('access')) toast(t('webErrAccess'), { kind: 'error' });
+  else if (errs.length) toast(t('webErrOffline'), { kind: 'error' });
+  else toast(t('webUpToDate'));
+  render();
+}
+const fmtSize = (n) => humanSize(n);
 /** Kachel auf der Startseite anklicken: Programm oder Web-App starten */
 function launch(app) {
-  if (app.category === 'web') return openWebApp(app);
+  if (app.category === 'web' || app.category === 'webapps') return openWebApp(app);
   if (hub.installed[app.id]) return doOpen(app);
   return go('app', app.id);
 }
@@ -156,7 +186,8 @@ function actionNode(app, compact) {
   }
   const s = status(app);
   const btn = (label, cls, run) => h('button', { class: `btn ${cls}`, onclick: (e) => { e.stopPropagation(); run(); } }, label);
-  if (s.kind === 'web') wrap.append(btn(t('open'), 'primary', () => openWebApp(app)));
+  if (s.kind === 'web' || s.kind === 'webprog') wrap.append(btn(t('open'), 'primary', () => openWebApp(app)));
+  else if (s.kind === 'webmissing') wrap.append(h('span', { class: 'muted small', text: webState(app).updating ? t('webUpdating') : '' }));
   else if (s.kind === 'update') wrap.append(btn(t('update'), 'primary', () => doInstall(app)));
   else if (s.kind === 'installed') wrap.append(btn(t('open'), '', () => doOpen(app)));
   else if (s.kind === 'none') wrap.append(btn(hub.sys.platform === 'win32' || app.win?.kind === 'portable' ? t('install') : t('download'), 'primary', () => doInstall(app)));
@@ -172,6 +203,13 @@ function statusLine(app) {
   }
   const s = status(app);
   if (s.kind === 'web') return h('span', { class: 'st' }, t('webApp'));
+  if (s.kind === 'webprog' || s.kind === 'webmissing') {
+    const w = s.web;
+    if (w.updating) return h('span', { class: 'st' }, t('webUpdating'));
+    if (s.kind === 'webmissing') return h('span', { class: 'st', title: t('webNotYet') }, t('webNotYet'));
+    const date = w.modified ? fmtDate(w.modified) : '';
+    return h('span', { class: 'st ok', title: date ? t('webState', { date }) : '' }, icon('check', 13), h('span', { class: 'st-msg', text: date ? `${t('webOffline')} · ${t('webState', { date })}` : t('webOffline') }));
+  }
   if (s.kind === 'update') return h('span', { class: 'st up' }, t('fromTo', { from: s.have.version, to: ver(s.rel.tag) }));
   if (s.kind === 'installed') return h('span', { class: 'st ok' }, t('installedVersion', { version: s.have.version }));
   if (s.kind === 'none' || s.kind === 'unavailable') return h('span', { class: 'st' }, `${t('notInstalled')}${shown(s.rel) ? ` · ${shown(s.rel)}` : ''}`);
@@ -204,7 +242,7 @@ const folderById = (id) => settings.folders.find((f) => f.id === id);
 const folderOf = (appId) => settings.folders.find((f) => f.apps.includes(appId));
 /** Was auf "Meine Programme" gehört: installierte Programme und Web-Apps (außer ausgeblendeten) */
 function homeApps() {
-  return C.APPS.filter((a) => (hub.installed[a.id] || a.category === 'web') && !settings.hidden.includes(a.id));
+  return C.APPS.filter((a) => (hub.installed[a.id] || a.category === 'web' || (a.category === 'webapps' && webState(a).available)) && !settings.hidden.includes(a.id));
 }
 const appKey = (id) => id;
 const folderKey = (id) => `f:${id}`;
@@ -405,7 +443,7 @@ function tileMenu(app, folder, x, y, alignRight = false) {
   const folderItems = settings.folders.filter((f) => f !== folder).map((f) => ({ label: f.name, run: () => moveToFolder(app.id, f.id) }));
   items.push({ label: t('moveToFolder'), submenu: [...folderItems, ...(folderItems.length ? ['-'] : []), { label: `${t('newFolder')} …`, run: () => createFolder(app.id) }] });
   if (folder) items.push({ label: t('removeFromFolder'), run: () => takeOutOfFolder(app.id) });
-  if (app.category === 'web') items.push({ label: t('hideFromHome'), run: () => { settings.hidden = [...settings.hidden, app.id]; removeFromFolders(app.id); saveSettings(); render(); } });
+  if (app.category === 'web' || app.category === 'webapps') items.push({ label: t('hideFromHome'), run: () => { settings.hidden = [...settings.hidden, app.id]; removeFromFolders(app.id); saveSettings(); render(); } });
   if (have && hub.sys.platform === 'win32' && !activeJob(app.id)) {
     items.push('-');
     items.push({ label: t('showInFolder'), run: () => api.reveal(app.id) });
@@ -468,7 +506,7 @@ function viewFolder(f) {
 }
 
 // ---------------------------------------------------------------- Entdecken (ein Tab: Filter + Sortierung)
-const FILTERS = [['all', 'all'], ['apps', 'programs'], ['games', 'games'], ['web', 'inBrowser']];
+const FILTERS = [['all', 'all'], ['apps', 'programs'], ['games', 'games'], ['webapps', 'webPrograms'], ['web', 'inBrowser']];
 function sortedApps(list) {
   const out = [...list];
   if (settings.discoverSort === 'name') out.sort((a, b) => a.name.localeCompare(b.name, settings.language));
@@ -498,16 +536,29 @@ function viewDiscover() {
   if (f === 'all' && settings.discoverSort === 'default') {
     out.push(section(t('programs'), C.APPS.filter((a) => a.category === 'apps' && !a.legacy)));
     out.push(section(t('games'), C.APPS.filter((a) => a.category === 'games' && !a.legacy)));
+    out.push(section(t('webPrograms'), APPS().filter((a) => a.category === 'webapps'), h('button', { class: 'btn ghost', onclick: () => go('webapps') }, t('all'))));
     out.push(section(t('inBrowser'), C.APPS.filter((a) => a.category === 'web')));
     out.push(section(t('legacy'), C.APPS.filter((a) => a.legacy)));
   } else {
-    const list = C.APPS.filter((a) => f === 'all' || a.category === f);
+    const list = APPS().filter((a) => f === 'all' || a.category === f);
     out.push(h('section', { class: 'sect' }, grid(sortedApps(list))));
   }
   return out;
 }
+// ---------------------------------------------------------------- Web-Programme (eigener Bereich)
+function viewWebapps() {
+  const list = APPS().filter((a) => a.category === 'webapps');
+  const w = hub.web || {};
+  const busy = w.syncing || list.some((a) => webState(a).updating);
+  const size = list.reduce((n, a) => n + (webState(a).size || 0), 0);
+  const head = h('div', { class: 'sect-head' }, h('h2', { text: t('webPrograms') }),
+    h('button', { class: 'btn', id: 'web-sync', disabled: busy ? 'disabled' : null, onclick: () => syncWeb() }, h('span', { class: busy ? 'spin-ico' : '' }, icon('refresh', 15)), busy ? t('webUpdating') : t('webUpdateNow')));
+  const lead = h('p', { class: 'lead muted', text: `${t('webProgramsLead')}${size ? ` · ${fmtSize(size)}` : ''}` });
+  return [h('section', { class: 'sect' }, head, lead, grid(list))];
+}
+
 function viewSearch() {
-  const hits = C.APPS.filter((a) => matches(a, query));
+  const hits = APPS().filter((a) => matches(a, query));
   if (!hits.length) return [h('div', { class: 'empty' }, icon('search', 28), h('p', { text: t('noResults', { q: query }) }))];
   return [section(`${t('search')}: ${query}`, hits)];
 }
@@ -562,7 +613,13 @@ function viewApp(app) {
 
   const meta = h('div', { class: 'hero-meta' });
   const chip = (label, value) => value && meta.append(h('span', { class: 'chip' }, h('b', { text: label }), value));
-  if (app.repo) {
+  if (app.category === 'webapps') {
+    const w = webState(app);
+    chip('', t('webProgram'));
+    if (w.modified) chip(t('released'), fmtDate(w.modified));
+    if (w.size) chip(t('size'), humanSize(w.size));
+    chip(t('systems'), 'Windows · Linux · macOS');
+  } else if (app.repo) {
     chip(t('version'), rel ? shown(rel) || (s.have && s.have.version) : '…');
     if (rel) chip(t('released'), fmtDate(rel.date));
     if (s.asset) chip(t('size'), humanSize(s.asset.size));
@@ -580,6 +637,12 @@ function viewApp(app) {
       actions)));
   out.push(meta);
   if (app.legacy) out.push(h('div', { class: 'banner warn' }, icon('alert', 18), h('span', { text: t('legacyNote') })));
+  // ehrlich sagen, was trotzdem Internet braucht
+  if (app.category === 'webapps') {
+    out.push(app.net
+      ? h('div', { class: 'banner info', 'data-net': app.id }, icon('web', 18), h('span', {}, h('b', { text: `${t('webNeedsNet')}: ` }), txt(app.net)))
+      : h('div', { class: 'banner info', 'data-net': app.id }, icon('check', 18), h('span', { text: t('webAllOffline') })));
+  }
 
   const shots = (app.shots || []).map((f) => `${ASSETS}/apps/${app.id}/${C.shotFile(f, L())}`);
   if (shots.length) out.push(h('div', { class: 'shots' }, shots.map((src, i) => h('button', { class: 'shot', onclick: () => lightbox(shots, i) }, h('img', { src, alt: '', loading: 'lazy', draggable: 'false' })))));
@@ -656,8 +719,8 @@ function lightbox(list, start) {
 
 // ---------------------------------------------------------------- Gerüst
 // Nur drei Bereiche: Meine Programme, Entdecken (mit Filter/Sortierung), Updates
-const NAV = [['home', 'home'], ['discover', 'discover'], '-', ['updates', 'updates']];
-const NAV_LABEL = { home: 'myApps', discover: 'discover', updates: 'updates' };
+const NAV = [['home', 'home'], ['discover', 'discover'], ['webapps', 'web'], '-', ['updates', 'updates']];
+const NAV_LABEL = { home: 'myApps', discover: 'discover', webapps: 'webPrograms', updates: 'updates' };
 
 function buildShell() {
   const app = $('#app');
@@ -696,10 +759,11 @@ function render({ top = false } = {}) {
   const scroll = v.scrollTop;
   let nodes;
   if (query && view !== 'app') nodes = viewSearch();
-  else if (view === 'app' && C.byId[current]) {
+  else if (view === 'app' && C.byId[current] && listed(C.byId[current])) {
     nodes = [h('div', { class: 'back-row' }, h('button', { class: 'btn ghost', onclick: () => go(lastList) }, icon('back', 16), t('back'))), ...viewApp(C.byId[current])];
   } else if (view === 'folder') nodes = viewFolder(folderById(currentFolder));
   else if (view === 'updates') nodes = viewUpdates();
+  else if (view === 'webapps') nodes = viewWebapps();
   else if (view === 'discover') nodes = viewDiscover();
   else nodes = viewHome();
   v.replaceChildren(h('div', { class: `page${view === 'app' && !query ? ' app-page' : ''}` }, nodes));
@@ -886,6 +950,8 @@ window.__hub = {
   setQuery: (q) => { query = q; $('#search').value = q; render(); },
   settings: () => settings,
   setSetting: (k, v) => { settings[k] = v; saveSettings(); theme(); buildShell(); render(); },
+  syncWeb,
+  get web() { return hub.web; },
   addFolder,
   moveToFolder,
   takeOutOfFolder,

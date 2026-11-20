@@ -179,7 +179,7 @@ const APPS = [
     ],
     shots: ['game.webp', 'online.webp', 'menu.webp'],
   },
-  // ---- im Browser: werden nur geöffnet
+  // ---- im Browser: brauchen den Server (Sync, Dateien), werden online im eigenen Fenster geöffnet
   {
     id: 'voca', name: 'Voca', category: 'web', color: '#10b981', site: `${SITE}/`, web: `${SITE}/`,
     keywords: 'latein vokabeln latin vocabulary schule lernen',
@@ -192,28 +192,101 @@ const APPS = [
     tagline: { en: 'Share files and folders with direct links.', de: 'Dateien und Ordner teilen, mit Direktlinks.' },
     about: { en: 'Upload files and folders and share them with direct links. Members get their own area.', de: 'Dateien und Ordner hochladen und mit Direktlinks teilen. Mitglieder bekommen einen eigenen Bereich.' },
   },
+  // ---- Web-Programme: fest eingebaut und offline nutzbar (Kategorie webapps). Quelle: mert.win<root>, beim Bauen als
+  // Schnappschuss mitgeliefert, danach still aktualisiert. Neue Programme: nur hier eintragen.
+  //   root  = Ordner auf der Website (Startseite des Programms), icon = Symbol auf der Website
+  //   net   = ehrlicher Hinweis, was trotzdem Internet braucht (fehlt = läuft komplett offline)
+  //   soon  = erst zeigen, sobald es auf der Website liegt (bzw. im Schnappschuss ist)
   {
-    id: 'web', name: 'Webgames', category: 'web', color: '#8b7dff', site: `${SITE}/web/`, web: `${SITE}/web/`,
-    keywords: 'spiele games snake tetris 2048 flappy pacman sudoku wordle',
-    tagline: { en: '25 classics for your break, on phones too.', de: '25 Klassiker für die Pause, auch am Handy.' },
-    about: { en: 'Snake, Tetris, 2048, Flappy, Pac-Man, Sudoku, Wordle and many more – right in the browser.', de: 'Snake, Tetris, 2048, Flappy, Pac-Man, Sudoku, Wordle und viele mehr – direkt im Browser.' },
+    id: 'qr', name: 'QR-Codes', category: 'webapps', color: '#64748b', root: '/qr/', icon: '/app-icons/qr-192.png', site: `${SITE}/qr/`,
+    keywords: 'qr code generator scanner wlan wifi kontakt link logo barcode',
+    tagline: { en: 'Design QR codes and scan them.', de: 'QR-Codes gestalten und scannen.' },
+    about: {
+      en: 'Design QR codes with colours, gradients, dot styles, a logo and a frame – for links, Wi-Fi, contacts, pictures and more. With a scanner for the camera and for images.',
+      de: 'QR-Codes gestalten – Farben, Verläufe, Punkt-Stile, Logo, Rahmen – für Links, WLAN, Kontakte, Bilder und mehr. Dazu ein Scanner für Kamera und Bilder.',
+    },
+    features: [
+      { en: ['Your style', 'Dots, corners, gradients, a logo in the middle and a frame with text.'], de: ['Dein Stil', 'Punkte, Ecken, Verläufe, ein Logo in der Mitte und ein Rahmen mit Text.'] },
+      { en: ['Everything a QR code can hold', 'Links, Wi-Fi access, contacts, e-mails, places and more.'], de: ['Alles, was in einen QR-Code passt', 'Links, WLAN-Zugang, Kontakte, E-Mails, Orte und mehr.'] },
+      { en: ['Scanner included', 'Read QR codes with the camera or from a picture.'], de: ['Mit Scanner', 'QR-Codes mit der Kamera oder aus einem Bild lesen.'] },
+    ],
+    net: { en: 'QR codes with a picture behind them upload the picture to Shareline – that needs internet.', de: 'QR-Codes mit einem Bild dahinter laden das Bild zu Shareline hoch – das braucht Internet.' },
   },
   {
-    id: 'skin', name: 'Skin-Editor', category: 'web', color: '#10b981', site: `${SITE}/skin/`, web: `${SITE}/skin/`,
-    keywords: 'minecraft skin cape editor 3d',
+    id: 'skin', name: 'Skin-Editor', category: 'webapps', color: '#10b981', root: '/skin/', icon: '/app-icons/skin-192.png', site: `${SITE}/skin/`,
+    keywords: 'minecraft skin cape editor 3d pixel',
     tagline: { en: 'Edit skins and capes in 3D.', de: 'Skins und Capes in 3D bearbeiten.' },
-    about: { en: 'Paint Minecraft skins and capes on a 3D model and save them as images.', de: 'Minecraft-Skins und Capes am 3D-Modell bemalen und als Bild speichern.' },
+    about: {
+      en: 'A Minecraft skin and cape editor with a 3D view, layers, mirroring, undo and animated MinecraftCapes capes.',
+      de: 'Minecraft Skin- und Cape-Editor mit 3D-Ansicht, Ebenen, Spiegeln, Rückgängig und animierten MinecraftCapes-Capes.',
+    },
+    features: [
+      { en: ['Paint in 3D', 'Draw right on the model or on the flat texture, with mirroring for both sides.'], de: ['In 3D malen', 'Direkt am Modell oder auf der flachen Textur malen, mit Spiegeln für beide Seiten.'] },
+      { en: ['Layers and undo', 'Hat and jacket layers, undo and redo.'], de: ['Ebenen und Rückgängig', 'Hut- und Jacken-Ebene, Rückgängig und Wiederholen.'] },
+      { en: ['Capes', 'Design capes, animated ones too, and save them as images.'], de: ['Capes', 'Capes gestalten, auch animierte, und als Bild speichern.'] },
+    ],
+    net: { en: 'Loading a skin or cape by player name (Mojang, textures.minecraft.net, MinecraftCapes) needs internet.', de: 'Skins und Capes nach Spielername laden (Mojang, textures.minecraft.net, MinecraftCapes) braucht Internet.' },
   },
   {
-    id: 'pse', name: 'Periodensystem', category: 'web', color: '#38bdf8', site: `${SITE}/periodensystem/`, web: `${SITE}/periodensystem/`,
-    keywords: 'chemie periodensystem elemente chemistry periodic table quiz',
+    id: 'bg', name: 'Hintergrund entfernen', category: 'webapps', color: '#e11d48', root: '/hintergrund/', icon: '/app-icons/bg-192.png', site: `${SITE}/hintergrund/`,
+    keywords: 'background remover hintergrund entfernen freistellen foto bild ki ai',
+    tagline: { en: 'Remove the background from photos.', de: 'Hintergrund aus Fotos entfernen.' },
+    about: {
+      en: 'Removes the background from photos, free and right on your computer. Your pictures never leave your device.',
+      de: 'Entfernt den Hintergrund aus Fotos – kostenlos und direkt auf deinem Computer. Deine Bilder verlassen nie dein Gerät.',
+    },
+    features: [
+      { en: ['One click', 'Drop in a photo, the background is gone.'], de: ['Ein Klick', 'Foto reinziehen, der Hintergrund ist weg.'] },
+      { en: ['Stays on your device', 'The AI runs on your computer, nothing is uploaded.'], de: ['Bleibt bei dir', 'Die KI rechnet auf deinem Computer, hochgeladen wird nichts.'] },
+    ],
+    net: { en: 'The AI model (RMBG-1.4) and its runtime come from the internet (Hugging Face, jsDelivr) – removing needs a connection until they have been loaded once.', de: 'Das KI-Modell (RMBG-1.4) und die Rechen-Bibliothek kommen aus dem Internet (Hugging Face, jsDelivr) – zum Entfernen braucht es eine Verbindung, bis sie einmal geladen sind.' },
+  },
+  {
+    id: 'mc', name: 'Minecraft-Tools', category: 'webapps', color: '#16a34a', root: '/mc/', icon: '/app-icons/mc-192.png', site: `${SITE}/mc/`,
+    keywords: 'minecraft befehle commands give summon tellraw banner schild rüstung trims crafting map art',
+    tagline: { en: 'Commands, banners, armour and map art.', de: 'Befehle, Banner, Rüstung und Map-Art.' },
+    about: {
+      en: 'Minecraft tools: commands for every version (/give, /summon, /tellraw), a banner and shield designer, armour with trims and leather colours, a crafting calculator and map art.',
+      de: 'Minecraft-Tools: Befehle für jede Version (/give, /summon, /tellraw), Banner- und Schild-Designer, Rüstung mit Trims und Lederfarben, Crafting-Rechner und Map-Art.',
+    },
+    features: [
+      { en: ['Commands for every version', '/give, /summon and /tellraw, built with a form instead of by hand.'], de: ['Befehle für jede Version', '/give, /summon und /tellraw, mit Formular statt von Hand.'] },
+      { en: ['Banners and shields', 'Layer patterns and colours and get the command.'], de: ['Banner und Schilde', 'Muster und Farben stapeln und den Befehl bekommen.'] },
+      { en: ['Crafting and map art', 'What you need for a recipe, and pictures as map art.'], de: ['Crafting und Map-Art', 'Was du für ein Rezept brauchst, und Bilder als Map-Art.'] },
+    ],
+    net: { en: 'Item, recipe and mob lists come from GitHub (minecraft-data) – without internet they are missing.', de: 'Item-, Rezept- und Mob-Listen kommen von GitHub (minecraft-data) – ohne Internet fehlen sie.' },
+  },
+  {
+    id: 'pse', name: 'Periodensystem', category: 'webapps', color: '#38bdf8', root: '/periodensystem/', icon: '/app-icons/pse-192.png', site: `${SITE}/periodensystem/`,
+    keywords: 'chemie periodensystem elemente chemistry periodic table quiz molmasse',
     tagline: { en: 'All 118 elements, molar masses and a quiz.', de: 'Alle 118 Elemente, Molmassen und Quiz.' },
-    about: { en: 'The periodic table with all 118 elements, a molar mass calculator and a quiz.', de: 'Das Periodensystem mit allen 118 Elementen, Molmassen-Rechner und Quiz.' },
+    about: {
+      en: 'Interactive periodic table: all 118 elements with a profile and atom model, state at any temperature, a discovery timeline, a molar mass calculator and a quiz.',
+      de: 'Interaktives Periodensystem: alle 118 Elemente mit Steckbrief und Atommodell, Aggregatzustand bei jeder Temperatur, Entdeckungs-Zeitstrahl, Molmassen-Rechner und Quiz.',
+    },
+    features: [
+      { en: ['Every element', 'Profile, atom model and values for all 118 elements.'], de: ['Jedes Element', 'Steckbrief, Atommodell und Werte für alle 118 Elemente.'] },
+      { en: ['Molar mass', 'Type a formula – brackets and hydrates work too.'], de: ['Molmasse', 'Summenformel eingeben – Klammern und Hydrate gehen auch.'] },
+      { en: ['Quiz', 'Practise symbols and names.'], de: ['Quiz', 'Symbole und Namen üben.'] },
+    ],
+  },
+  {
+    id: 'web', name: 'Webgames', category: 'webapps', color: '#8b7dff', root: '/web/', icon: '/app-icons/web-192.png', site: `${SITE}/web/`,
+    keywords: 'spiele games snake tetris 2048 flappy pacman sudoku wordle solitär',
+    tagline: { en: '25 classics for your break.', de: '25 Klassiker für die Pause.' },
+    about: { en: 'Snake, Tetris, 2048, Flappy, Pac-Man, Sudoku, Wordle and many more – with records that stay on your computer.', de: 'Snake, Tetris, 2048, Flappy, Pac-Man, Sudoku, Wordle und viele mehr – mit Rekorden, die auf deinem Computer bleiben.' },
+  },
+  {
+    id: 'deal', name: 'Dealline', category: 'webapps', color: '#0d9488', root: '/deal/', icon: '/app-icons/deal-192.png', site: `${SITE}/deal/`, soon: true,
+    keywords: 'deal dealline angebote',
+    tagline: { en: 'New on mert.win.', de: 'Neu auf mert.win.' },
+    about: { en: 'Dealline from mert.win, built into W Hub.', de: 'Dealline von mert.win, fest eingebaut in W Hub.' },
   },
 ];
 
 const byId = Object.fromEntries(APPS.map((a) => [a.id, a]));
-const CATEGORIES = ['apps', 'games', 'web'];
+const CATEGORIES = ['apps', 'games', 'webapps', 'web'];
+const WEBAPPS = APPS.filter((a) => a.category === 'webapps');
 
 /** Text in der gewünschten Sprache, sonst Englisch */
 const loc = (obj, lang) => (obj ? obj[lang] || obj.en || '' : '');
@@ -245,4 +318,4 @@ function newer(a, b) {
   return false;
 }
 
-module.exports = { APPS, byId, CATEGORIES, loc, shotFile, pickAsset, parseVersion, newer };
+module.exports = { APPS, byId, CATEGORIES, WEBAPPS, loc, shotFile, pickAsset, parseVersion, newer };
