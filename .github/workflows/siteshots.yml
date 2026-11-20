@@ -1,0 +1,41 @@
+name: Website-Bilder
+
+# Bilder für mert.win/hub mit echten Daten (Releases von GitHub, Web-Programme von mert.win), unsichtbar unter
+# Xvfb aufgenommen und als WebP nach website-updates/img/ committet. Läuft, wenn sich die Bild-Aufnahme ändert,
+# oder von Hand.
+on:
+  push:
+    branches: ["claude/**"]
+    paths: ["tools/siteshots.js", ".github/workflows/siteshots.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: siteshots-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  shots:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm ci
+      - run: sudo apt-get update && sudo apt-get install -y xvfb
+      - run: npm run bundle
+      - run: node tools/fetch-webapps.js
+      - run: xvfb-run -a npx electron . --siteshots "$RUNNER_TEMP/shots" --no-sandbox
+      - name: Bilder committen
+        run: |
+          mkdir -p website-updates/img
+          cp "$RUNNER_TEMP"/shots/shots/*.webp website-updates/img/
+          ls -la website-updates/img
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add website-updates/img
+          git diff --cached --quiet || git commit -m "Website-Bilder neu aufgenommen (W Hub $(node -p "require('./package.json').version"))"
+          git push

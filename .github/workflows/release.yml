@@ -34,7 +34,7 @@ jobs:
         run: |
           gh release create "$TAG" --repo "${{ github.repository }}" --target "${{ github.sha }}" \
             --draft --title "W Hub $TAG" \
-            --notes "Automatisch gebaut. Details siehe README." \
+            --notes "W Hub ${TAG#v}. Alle Neuerungen: https://mert.win/hub/changelog.html" \
             || echo "Release existiert schon, weiter."
 
   build:
@@ -55,6 +55,8 @@ jobs:
       - if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y libarchive-tools
       - run: npm run bundle
+      # Schnappschuss der Web-Programme von mert.win (bricht nie ab: ohne mert.win wird ohne gebaut, mit Warnung)
+      - run: node tools/fetch-webapps.js
       - run: npx electron-builder --publish always
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

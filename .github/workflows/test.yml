@@ -1,10 +1,13 @@
 name: Selbsttest
 
-# Selbsttest bei jedem Push auf main: Windows mit Test-Installer (Oberfläche, Installieren, Updates,
-# Verschieben, Auto-Update), dazu auf allen drei Systemen der Hintergrundbetrieb (Start mit dem System
-# ohne Fenster, Symbol im Infobereich, parallele Downloads).
+# Selbsttest bei jedem Push auf main und für Pull Requests: Windows mit Test-Installer (Oberfläche, Installieren,
+# Updates, Verschieben, Auto-Update), dazu auf allen drei Systemen der Hintergrundbetrieb (Start mit dem System
+# ohne Fenster, Symbol im Infobereich, parallele Downloads) und die Web-Programme (Mini-Server mit Zugangsschutz).
+# Unter Windows wird außerdem der NSIS-Installer probehalber gebaut (Desktop-Symbol-Include).
 on:
   push:
+    branches: [main]
+  pull_request:
     branches: [main]
   workflow_dispatch:
 
@@ -28,3 +31,5 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y xvfb
       - run: npm run bundle
       - run: node tools/run-selftest.js selftest-out
+      - if: runner.os == 'Windows'
+        run: npx electron-builder -w nsis --x64 --publish never
