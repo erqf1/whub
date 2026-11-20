@@ -19,7 +19,21 @@ module.exports = async function siteshots(win, dir, hub) {
   const snap = async (name, from = win) => {
     if (only.length && !only.some((o) => name.startsWith(o))) return;
     await sleep(800);
-    const img = await from.webContents.capturePage();
+    // unter Xvfb klappt die erste Aufnahme manchmal nicht (UnknownVizError): neu versuchen, sonst auslassen
+    let img = null;
+    for (let i = 0; i < 4 && !img; i++) {
+      try {
+        img = await from.webContents.capturePage();
+        if (img.isEmpty()) img = null;
+      } catch (e) {
+        console.log('Aufnahme', name, 'noch einmal:', e.message);
+      }
+      if (!img) await sleep(1000);
+    }
+    if (!img) {
+      console.log('Bild', name, 'ausgelassen');
+      return;
+    }
     const b64 = img.toPNG().toString('base64');
     const webp = await js(`(async () => {
       const i = new Image(); i.src = 'data:image/png;base64,${b64}'; await i.decode();
@@ -70,7 +84,7 @@ module.exports = async function siteshots(win, dir, hub) {
       }
     }
     // geöffnete Web-Programme (eigene Fenster, offline aus dem eingebauten Schnappschuss)
-    for (const id of ['pse', 'qr', 'web']) {
+    for (const id of ['pse', 'qr', 'web', 'deal']) {
       if (only.length && !only.some((o) => `open-${id}`.startsWith(o))) continue;
       if (!(await hub.openWebApp(id))) continue;
       let w = null;

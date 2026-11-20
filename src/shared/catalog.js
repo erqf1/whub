@@ -264,11 +264,20 @@ const APPS = [
     about: { en: 'Snake, Tetris, 2048, Flappy, Pac-Man, Sudoku, Wordle and many more – with records that stay on your computer.', de: 'Snake, Tetris, 2048, Flappy, Pac-Man, Sudoku, Wordle und viele mehr – mit Rekorden, die auf deinem Computer bleiben.' },
   },
   {
-    id: 'deal', name: 'Dealline', category: 'webapps', color: '#0d9488', root: '/deal/', icon: '/app-icons/deal-192.png', site: `${SITE}/deal/`, soon: true,
-    keywords: 'deal dealline angebote',
-    tagline: { en: 'New on mert.win.', de: 'Neu auf mert.win.' },
-    about: { en: 'Dealline from mert.win, built into W Hub.', de: 'Dealline von mert.win, fest eingebaut in W Hub.' },
+    id: 'deal', name: 'Dealline', category: 'webapps', color: '#0d9488', root: '/deal/', icon: '/deal/icon-192.png', site: `${SITE}/deal/`, soon: true,
+    keywords: 'deal vertrag abmachung vereinbarung unterschreiben unterschrift regeln pdf contract agreement sign',
+    tagline: { en: 'Put deals in writing and sign them.', de: 'Deals festhalten und unterschreiben.' },
+    about: {
+      en: 'Write down deals with others – what it is about, who does what, rules for everyone or for single people – sign them, share them as a link and download them as a PDF or picture.',
+      de: 'Deals mit anderen festhalten – worum es geht, wer was macht, Regeln für alle oder einzelne – unterschreiben, als Link teilen und als PDF oder Bild herunterladen.',
+    },
+    features: [
+      { en: ['Sign together', 'Everyone signs right in the deal; signatures from a returned link are merged.'], de: ['Gemeinsam unterschreiben', 'Alle unterschreiben direkt im Deal; Unterschriften aus einem zurückgeschickten Link werden übernommen.'] },
+      { en: ['The link is the deal', 'The whole deal sits inside the link – nothing is stored on a server.'], de: ['Der Link ist der Deal', 'Der ganze Deal steckt im Link – nichts liegt auf einem Server.'] },
+      { en: ['PDF, picture, print', 'Download as PDF or PNG, print it, or save it as a .json file.'], de: ['PDF, Bild, Drucken', 'Als PDF oder PNG speichern, drucken oder als .json-Datei sichern.'] },
+    ],
   },
+
   // ---- im Browser: brauchen den Server (Sync, Dateien), werden online im eigenen Fenster geöffnet
   {
     id: 'voca', name: 'Voca', category: 'web', color: '#10b981', site: `${SITE}/`, web: `${SITE}/`,

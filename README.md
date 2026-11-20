@@ -4,7 +4,7 @@ Alle Programme von W Software an einem Ort: durchblättern, suchen, installieren
 
 ![W Hub](https://mert.win/hub/img/home-de.webp)
 
-- **Web-Programme, fest eingebaut:** QR-Codes, Skin-Editor, Hintergrund entfernen, Minecraft-Tools, Periodensystem, Webgames (und Dealline, sobald es online ist) laufen offline im eigenen Fenster und werden still von mert.win aktualisiert.
+- **Web-Programme, fest eingebaut:** QR-Codes, Skin-Editor, Hintergrund entfernen, Minecraft-Tools, Periodensystem, Webgames und Dealline laufen offline im eigenen Fenster und werden still von mert.win aktualisiert.
 - **Meine Programme:** alle installierten Programme und die Web-Apps als Start-Kacheln, sortierbar per Ziehen und in eigenen Ordnern.
 - **Web-Apps als eigene App:** Voca, Files & Co. öffnen in einem eigenen Fenster mit eigenem Speicher, wie mit Webline geöffnet.
 - **Entdecken:** Programme, Spiele und alles, was im Browser läuft. Jede App hat ihre eigene Seite wie auf der Website, mit Bildern, Funktionen und den Neuerungen der letzten Versionen.
