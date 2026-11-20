@@ -247,7 +247,8 @@ fetch(steve).then((r) => r.text()).then((t) => { window.STEVE = t; });`,
       ok('Offline: absoluter Pfad per fetch', await q(`fetch('/app-icons/acryl/ocean.webp').then((r) => r.text()).then((t) => t === 'WEBP-ocean')`));
       ok('Offline: CDN-Bibliothek aus dem Speicher', (await until(() => q('window.fakeQr === true'), 5000)) === true);
       ok('Eigener Speicherbereich je Programm', /web-qr/.test(qw.webContents.session.storagePath || ''), qw.webContents.session.storagePath);
-      ok('Keine Menüleiste', !qw.isMenuBarVisible());
+      // macOS: kein Menü am Fenster, sondern das globale App-Menü - dort meldet Electron immer "sichtbar"
+      if (process.platform !== 'darwin') ok('Keine Menüleiste', !qw.isMenuBarVisible());
       ok('Offline: nicht gespeicherte API meldet Fehler statt zu hängen', await q(`fetch('/share/api').then((r) => r.status === 503, () => true)`));
       await qw.loadURL('whub-web://mert.win/help/').catch(() => {});
       ok('Offline: nicht gespeicherte Seite zeigt Hinweis', (await until(() => q(`document.title === 'Offline nicht verfügbar'`), 5000)) === true, await q('document.title'));
