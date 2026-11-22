@@ -3,8 +3,8 @@
 // Alle Programme und Seiten, die W Hub zeigt. Texte wie auf den Websites (mert.win/<seite>), auf Englisch und Deutsch;
 // andere Sprachen nehmen Englisch. Versionen, Neuerungen und Downloads kommen live aus den GitHub-Releases.
 //
-// win.kind:  inno     = Inno-Setup (Vidline, Clipline, JumpNDodge), still mit /VERYSILENT
-//            nsis     = electron-builder-Installer (Webline, Textline, Picline, Convertline), still mit /S
+// win.kind:  inno     = Inno-Setup (Vidline, Clipline, Sysline, JumpNDodge), still mit /VERYSILENT
+//            nsis     = electron-builder-Installer (Webline, Textline, Picline, Gitline, Convertline), still mit /S
 //            portable = eine einzelne EXE, die W Hub selbst ablegt und verknüpft (GambelStrike 2)
 // win.keys / win.names: woran W Hub das installierte Programm in der Windows-Liste "Apps & Features" erkennt.
 
@@ -122,6 +122,44 @@ const APPS = [
       { en: ['Also in the browser', 'Picline runs on mert.win/pic/app too.'], de: ['Auch im Browser', 'Picline läuft auch auf mert.win/pic/app.'] },
     ],
     shots: ['paint-%L.webp', 'pixel-%L.webp', 'layers-%L.webp', 'effects-%L.webp'],
+  },
+  {
+    id: 'sys', name: 'Sysline', repo: 'erqf1/sysline', color: '#d61f45', category: 'apps', site: `${SITE}/sys/`,
+    keywords: 'overlay fps cpu gpu temperatur temperature ping makro macro tasten keys remap gaming profile',
+    win: { kind: 'inno', keys: ['{B7E3C1A4-5D29-4F6B-9A80-3C2E7D41F5A9}_is1'], names: /^Sysline\b/, exe: 'Sysline.exe' },
+    linux: { pkg: 'sysline' }, mac: { app: 'Sysline.app' },
+    assets: QT_ASSETS('sysline', 'Sysline'),
+    tagline: { en: 'Game overlay, keys and macros.', de: 'Spiel-Overlay, Tasten und Makros.' },
+    about: {
+      en: 'Sysline puts FPS, CPU and GPU load, temperatures and ping in a corner of your game. It also remaps keys and plays macros, with a profile for every game that switches by itself.',
+      de: 'Sysline zeigt FPS, CPU- und GPU-Last, Temperaturen und Ping in einer Ecke deines Spiels. Dazu belegt es Tasten um und spielt Makros ab, mit einem Profil für jedes Spiel, das von selbst wechselt.',
+    },
+    features: [
+      { en: ['Everything at a glance', 'The overlay stays on top, lets every click through and never takes focus. Ctrl+Shift+O shows or hides it.'], de: ['Alles auf einen Blick', 'Das Overlay bleibt im Vordergrund, lässt jeden Klick durch und nimmt nie den Fokus. Strg+Umschalt+O blendet es ein und aus.'] },
+      { en: ['Real values', 'Frame rate counted like PresentMon, GPU temperature straight from the driver, ping to the server you play on.'], de: ['Echte Werte', 'Bildrate gezählt wie PresentMon, GPU-Temperatur direkt vom Treiber, Ping zu dem Server, auf dem du spielst.'] },
+      { en: ['Remap any key', 'One key becomes another or a whole combination. Switch off keys you keep hitting by accident, like the Windows key.'], de: ['Jede Taste umbelegen', 'Eine Taste wird zu einer anderen oder zu einer ganzen Kombination. Tasten, die du aus Versehen drückst, wie die Windows-Taste, schaltest du ab.'] },
+      { en: ['A profile for every game', 'Sysline sees which game is in front and switches keys and macros by itself. Macros are off by default.'], de: ['Ein Profil für jedes Spiel', 'Sysline erkennt, welches Spiel vorne ist, und wechselt Tasten und Makros von selbst. Makros sind ab Werk aus.'] },
+    ],
+    shots: ['overview-%L.webp', 'overlay-%L.webp', 'keys-%L.webp', 'macros-%L.webp', 'profiles-%L.webp'],
+  },
+  {
+    id: 'git', name: 'Gitline', repo: 'erqf1/gitline', color: '#c026d3', category: 'apps', site: `${SITE}/git/`,
+    keywords: 'git github gitlab commit push pull branch merge versionen version control code',
+    win: { kind: 'nsis', names: /^Gitline \d/, exe: 'Gitline.exe' },
+    linux: { pkg: 'gitline' }, mac: { app: 'Gitline.app' },
+    assets: EB_ASSETS('Gitline'),
+    tagline: { en: 'Git without the terminal.', de: 'Git ganz ohne Terminal.' },
+    about: {
+      en: 'Gitline shows what changed in your project and lets you commit, branch, pull and push with a click. It uses the Git already on your computer – simple enough for your first repository, fast enough for every day.',
+      de: 'Gitline zeigt, was sich in deinem Projekt geändert hat, und du committest, verzweigst, holst und schiebst mit einem Klick. Es nutzt das Git, das schon auf deinem Computer ist – einfach genug fürs erste Repository, schnell genug für jeden Tag.',
+    },
+    features: [
+      { en: ['Changes you can actually read', 'Side by side or one below the other, in color, and stage single sections or lines for the next commit.'], de: ['Änderungen, die man lesen kann', 'Nebeneinander oder untereinander, in Farbe, und einzelne Abschnitte oder Zeilen für den nächsten Commit auswählen.'] },
+      { en: ['Branches in one click', 'Create, switch, merge and delete, and see which commits are only on one side before you merge.'], de: ['Branches mit einem Klick', 'Anlegen, wechseln, zusammenführen und löschen – und vorher sehen, welche Commits nur auf einer Seite sind.'] },
+      { en: ['History and conflicts', 'A graph of where branches split and meet. Clashing blocks are colored: keep yours or take theirs.'], de: ['Verlauf und Konflikte', 'Ein Graph zeigt, wo Branches sich trennen und treffen. Konflikte sind farbig: deine Version behalten oder ihre nehmen.'] },
+      { en: ['Your sign-in stays with your system', 'Gitline never sees passwords or tokens. On Windows: right-click a folder and choose "Open with Gitline".'], de: ['Anmeldung bleibt beim System', 'Gitline sieht nie Passwörter oder Tokens. Unter Windows: Rechtsklick auf einen Ordner, „Mit Gitline öffnen“.'] },
+    ],
+    shots: ['changes-%L.webp', 'history-%L.webp', 'branches-%L.webp', 'conflict-%L.webp', 'stash-%L.webp'],
   },
   {
     id: 'convert', name: 'Convertline', repo: 'erqf1/convertline', color: '#0ea5e9', category: 'apps', legacy: true, site: `${SITE}/convert/`,
