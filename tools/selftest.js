@@ -154,7 +154,7 @@ module.exports = async function selftest(win, dir, hub) {
 
     // ---------------------------------------------------------------- Entdecken (ein Tab mit Filter und Sortierung)
     await click('.nav-btn[data-view="discover"]');
-    ok('Katalog: 18 Kacheln (Dealline noch versteckt)', (await js(`document.querySelectorAll('.card').length`)) === 18, await js(`document.querySelectorAll('.card').length`));
+    ok('Katalog: 19 Kacheln (Dealline noch versteckt)', (await js(`document.querySelectorAll('.card').length`)) === 19, await js(`document.querySelectorAll('.card').length`));
     ok('Bereiche: Programme, Spiele, Web-Programme, Im Browser, Legacy', (await js(`[...document.querySelectorAll('.sect-head h2')].map(x => x.textContent).join('|')`)) === 'Programme|Spiele|Web-Programme|Im Browser|Legacy', await js(`[...document.querySelectorAll('.sect-head h2')].map(x => x.textContent).join('|')`));
     ok('Convertline ist Legacy, JumpNDodge nicht mehr', !!(await js(`document.querySelector('.card[data-app="convert"] .badge')`)) && !(await js(`document.querySelector('.card[data-app="jump"] .badge')`)));
     ok('Erkannt: Vidline 1.13.0 mit Update auf 1.14.0', (await text('.card[data-app="vid"] .st')).includes('1.13.0 → 1.14.0'), await text('.card[data-app="vid"] .st'));
@@ -188,7 +188,7 @@ module.exports = async function selftest(win, dir, hub) {
     ok('App-Seite: Name', (await text('.hero h1')) === 'Vidline');
     ok('App-Seite: Version, Größe, Ort', (await text('.hero-meta')).includes('1.14.0') && (await text('.hero-meta')).includes('Download') && (await text('.hero-meta')).includes('Ort'), await text('.hero-meta'));
     ok('App-Seite: Systeme', (await text('.hero-meta')).includes('Windows · Linux · macOS'), await text('.hero-meta'));
-    ok('App-Seite: 5 Bilder, deutsche Fassung', (await js(`[...document.querySelectorAll('.shot img')].map(i => i.src.split('/').pop()).join()`)) === 'player.webp,library-de.webp,music.webp,theme-studio.webp,theme-light.webp');
+    ok('App-Seite: 4 Bilder', (await js(`[...document.querySelectorAll('.shot img')].map(i => i.src.split('/').pop()).join()`)) === 'player.webp,music.webp,theme-studio.webp,theme-light.webp');
     ok('App-Seite: Bilder geladen', await until(`(() => { const i = document.querySelector('.shot img'); return i && i.complete && i.naturalWidth > 100; })()`, 8000));
     ok('Neuerungen als Markdown (Liste, fett, Code, Link)', await js(`(() => { const md = document.querySelector('.notes .md'); return md && md.querySelector('li b') && md.querySelector('code') && md.querySelector('a') && md.querySelector('li ul li') && !md.textContent.includes('intern'); })()`));
     ok('Frühere Versionen: 2', (await js(`document.querySelectorAll('.older details').length`)) === 2);
@@ -199,7 +199,7 @@ module.exports = async function selftest(win, dir, hub) {
     await js(`document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))`);
     ok('Bild schließen mit Esc', !(await js(`!!document.querySelector('.lightbox')`)));
     await click('.back-row .btn');
-    ok('Zurück zu Entdecken', await until(`document.querySelectorAll('.card').length === 18`, 3000));
+    ok('Zurück zu Entdecken', await until(`document.querySelectorAll('.card').length === 19`, 3000));
 
     // ---------------------------------------------------------------- Installieren (Webline, nsis, für mich)
     nextReg([VID('1.13.0'), CLIP, TEXT('1.1.1'), WEB()]);
@@ -419,7 +419,7 @@ module.exports = async function selftest(win, dir, hub) {
     await click('#refresh');
     await sleep(800);
     ok('Erneut prüfen: unveränderte Releases kommen als 304', mode.notModified >= 7, mode.notModified);
-    ok('Dabei je Programm nur eine Anfrage', mode.apiCalls - calls === 10, mode.apiCalls - calls);
+    ok('Dabei je Programm nur eine Anfrage', mode.apiCalls - calls === 11, mode.apiCalls - calls);
     mode.limit = true;
     await click('#refresh');
     ok('Limit erreicht: Hinweis oben', await until(`(document.querySelector('#checked') || {}).textContent.includes('GitHub-Limit')`, 8000), await text('#checked'));

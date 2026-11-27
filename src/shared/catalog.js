@@ -43,10 +43,28 @@ const APPS = [
     features: [
       { en: ['Opens instantly', 'Double-click a video and it plays. No import, no project, no waiting.'], de: ['Öffnet sofort', 'Doppelklick auf ein Video und es läuft. Kein Import, kein Projekt, kein Warten.'] },
       { en: ['Your music looks this good', 'The cover fills the window, softly blurred, with title and artist in front. Tags can be edited right in Vidline.'], de: ['So gut sieht deine Musik aus', 'Das Cover füllt das Fenster, weich verwischt, davor Titel und Interpret. Tags bearbeitest du direkt in Vidline.'] },
-      { en: ['Music plugin', 'A library with albums, artists and playlists, a queue with shuffle and repeat, and downloads by link.'], de: ['Musik-Plugin', 'Bibliothek mit Alben, Interpreten und Playlists, Warteschlange mit Zufall und Wiederholen, Download per Link.'] },
       { en: ['Edit with one key', 'Cut, blur, add music and export with GPU acceleration. 12 designs, any color.'], de: ['Bearbeiten mit einer Taste', 'Schneiden, verwischen, Musik drunterlegen und mit der Grafikkarte exportieren. 12 Designs, jede Farbe.'] },
     ],
-    shots: ['player.webp', 'library-%L.webp', 'music.webp', 'theme-studio.webp', 'theme-light.webp'],
+    shots: ['player.webp', 'music.webp', 'theme-studio.webp', 'theme-light.webp'],
+  },
+  {
+    id: 'tune', name: 'Tuneline', repo: 'erqf1/tuneline', color: '#84cc16', category: 'apps', site: `${SITE}/tune/`,
+    keywords: 'music player musik mp3 flac playlist playlists equalizer album alben interpreten library bibliothek',
+    win: { kind: 'nsis', names: /^Tuneline \d/, exe: 'Tuneline.exe' },
+    linux: { pkg: 'tuneline' }, mac: { app: 'Tuneline.app' },
+    assets: EB_ASSETS('Tuneline'),
+    tagline: { en: 'Your music, finally at home.', de: 'Deine Musik, endlich zu Hause.' },
+    about: {
+      en: 'Tuneline plays the music on your computer: albums, artists and playlists, a real equalizer, crossfade and a visualizer. It is the new home of Vidline’s music plugin and takes over its library automatically.',
+      de: 'Tuneline spielt die Musik auf deinem Computer: Alben, Interpreten und Playlists, ein echter Equalizer, Überblenden und ein Visualizer. Es ist das neue Zuhause des Musik-Plugins von Vidline und übernimmt dessen Bibliothek automatisch.',
+    },
+    features: [
+      { en: ['A real library', 'Start page, songs, albums, artists, liked songs, recently and most played. Watched folders pick up new songs by themselves.'], de: ['Eine echte Bibliothek', 'Startseite, Songs, Alben, Interpreten, Lieblingssongs, zuletzt und meistgehört. Beobachtete Ordner finden neue Songs von selbst.'] },
+      { en: ['Sounds like you want', '10-band equalizer with presets, even out loudness, crossfade or gapless playback.'], de: ['Klingt, wie du willst', '10-Band-Equalizer mit Voreinstellungen, Lautstärke angleichen, Überblenden oder lückenlos.'] },
+      { en: ['Now playing, in big', 'Large cover on a blurred background and a visualizer. Media keys and the Windows volume overlay work.'], de: ['Jetzt läuft, in groß', 'Großes Cover auf verschwommenem Hintergrund und ein Visualizer. Medientasten und die Lautstärke-Anzeige von Windows funktionieren.'] },
+      { en: ['Playlists and links', 'Drag to sort, M3U in and out, edit tags and save music you are allowed to download from a link.'], de: ['Playlists und Links', 'Per Ziehen sortieren, M3U rein und raus, Angaben bearbeiten und Musik per Link speichern, die du laden darfst.'] },
+    ],
+    shots: ['home-%L.webp', 'now-%L.webp', 'album-%L.webp', 'eq-%L.webp', 'queue-%L.webp'],
   },
   {
     id: 'clip', name: 'Clipline', repo: 'erqf1/clipline', color: '#f43f5e', category: 'apps', site: `${SITE}/clip/`,
